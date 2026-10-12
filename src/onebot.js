@@ -1,6 +1,7 @@
 // OneBot v11 客户端：WebSocket 只收事件，HTTP API 负责发送与查询。
 // （原版经 @snowluma/sdk 收事件；这里直接实现标准 OneBot v11，去掉 SDK 补丁依赖。）
 import WebSocket from 'ws';
+import { assertProtectedAction } from './protected-actions.js';
 import { sanitizeUserText, escapeCqText } from './util.js';
 import { skillManager } from './skills/manager.js';
 
@@ -267,6 +268,7 @@ export class OneBotClient {
 
   /** OneBot HTTP API（发送与查询都走这里）。 */
   async call(action, params = {}, timeoutMs = null) {
+    assertProtectedAction(action, params);
     // ── 超时按 action 分档（这里修过一个真实故障）──────────────────────────
     // 原来一律 15 秒。查询类够用，但**发送类不够**：图片/视频以 base64 或大 body
     // 发出去时，协议端要走完「接收 body → 解码 → 上传腾讯服务器 → 返回」，

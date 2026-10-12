@@ -7,6 +7,7 @@
 // 重构说明：所有工具通过 registerTool() 注册到 tool-registry.js，
 // 支持在设置页按卡片勾选启用/禁用。
 import { getConfig } from './config.js';
+import { assertDeliveryAllowed } from './chat-policy.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
 import { skillManager } from './skills/manager.js';
@@ -179,7 +180,7 @@ function registerAllTools() {
           replyToMessageId: args.replyToMessageId ?? null,
           atUserId: args.atUserId ?? null
         });
-        ctx.session.sent.push(...result.sent.map((s) => ({ type: 'text', text: s.text, at: s.at })));
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...result.sent.map((s) => ({ type: 'text', text: s.text, at: s.at })));
         ctx.emit('session-update', ctx.session.id);
         const note = ['已发送。不要输出"已发送"类汇报，继续思考下一步或直接结束。'];
         if (result.failed.length) note.push(`（另有 ${result.failed.length} 条发送失败：${result.failed.map((f) => f.error).join('；')}——成功的不需要重发，失败的请稍后再试或减少条数）`);
@@ -228,21 +229,11 @@ function registerAllTools() {
         if (wantTarget === ctx.chatKey) {
           return err(`目标 ${wantTarget} 就是当前会话，直接用 send_message 即可。`);
         }
-        const [tKind, tId] = wantTarget.split(':');
-        const allow = getConfig().allow || {};
-        const allowList = (tKind === 'group' ? allow.groups : allow.private) || [];
-        // 白名单空名单口径必须与消息入口 app.allowed() 一致（群/私聊统一：
-        // 空名单 + allowAllWhenEmpty 才放行）。曾经私聊在这里无条件放行，
-        // 入口拒收私聊、send_to 却能替模型把消息发给任意私聊 QQ —— 同一
-        // 白名单概念两处判定相反。
-        const allowedAll = allowList.length === 0 && getConfig().allowAllWhenEmpty === true;
-        if (!(allowList.map(String).includes(tId) || allowedAll)) {
-          return err(`目标 ${wantTarget} 不在白名单内，不能发送。`);
-        }
+        assertDeliveryAllowed(wantTarget, getConfig(), ctx.chatKey);
         const messages = normalizeMessageList(args.messages);
         if (!messages.length) return err('消息内容为空');
         const result = await ctx.sender.sendTextBatch(wantTarget, messages, {});
-        ctx.session.sent.push(...result.sent.map((s) => ({ type: 'text', text: s.text, to: wantTarget })));
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...result.sent.map((s) => ({ type: 'text', text: s.text, to: wantTarget })));
         ctx.emit('session-update', ctx.session.id);
         const note = [`已发送到 ${wantTarget}。不要输出汇报。`];
         if (result.failed.length) note.push(`（另有 ${result.failed.length} 条发送失败：${result.failed.map((f) => f.error).join('；')}）`);
@@ -301,7 +292,7 @@ function registerAllTools() {
           atUserId: args.atUserId ?? null
         });
         ctx.stickers.markUsed(sticker.id, String(ctx.session.triggerText || '').slice(0, 100));
-        ctx.session.sent.push({ type: 'sticker', text: `[表情包:${sticker.desc || sticker.localNote || sticker.id}]`, at: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push({ type: 'sticker', text: `[表情包:${sticker.desc || sticker.localNote || sticker.id}]`, at: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
         ctx.emit('session-update', ctx.session.id);
         return ok({ sent: true, messageId: result?.message_id ?? null, note: '表情已发送。' });
       } catch (error) {
@@ -1051,7 +1042,7 @@ function registerAllTools() {
           atUserId: args.atUserId ?? null
         });
         st.sent += 1;
-        ctx.session.sent.push({
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push({
           type: 'image',
           text: `[图片${args.note ? `:${String(args.note).slice(0, 40)}` : ''}]`,
           at: new Date().toLocaleTimeString('zh-CN', { hour12: false })

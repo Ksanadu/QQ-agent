@@ -30,7 +30,49 @@ function flushSettingsSaves() {
   }
 }
 
+function setApprovalStatus(message) {
+  const status = $('#approval-status');
+  if (status) status.textContent = message;
+}
+
+async function loadActionApprovals() {
+  const container = $('#approval-list');
+  if (!container) return;
+  try {
+    const data = await api('/api/action-approvals');
+    if ($('#approval-list') !== container) return;
+    container.innerHTML = (data.operations || []).map((op) => `<div class="setcard">
+      <div>操作码 ${esc(op.id)} · ${esc(op.status)}</div>
+      <div class="hint">来源 ${esc(op.chatKey)} · 请求者 ${esc(op.actorId)} · ${esc(op.reason || '')}</div>
+      <ul>${op.targets.map((target) => `<li>${esc(target.label)}</li>`).join('')}</ul>
+      ${op.status === 'pending' ? `<button class="btn btn-danger" type="button" data-approval="${esc(op.id)}" data-decision="approve">批准删除这批表情</button>
+        <button class="btn" type="button" data-approval="${esc(op.id)}" data-decision="cancel">拒绝</button>` : ''}
+      ${op.results ? `<div class="hint">已删除 ${op.results.filter((r) => r.deleted).length} 张；${op.results.filter((r) => !r.deleted).map((r) => esc(r.error)).join('；')}</div>` : ''}
+    </div>`).join('') || '<p class="hint">没有待批准操作。重启后旧操作码自动失效，需要重新预览。</p>';
+    for (const button of container.querySelectorAll('[data-approval]')) button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await api(`/api/action-approvals/${button.dataset.approval}/${button.dataset.decision}`, { method: 'POST', body: '{}' }); }
+      catch (error) { setApprovalStatus(error.message); }
+      await loadActionApprovals();
+    });
+  } catch (error) { if ($('#approval-list') === container) container.textContent = error.message; }
+}
+
+function bindActionApprovalsSettings(c) {
+  $('#approval-refresh')?.addEventListener('click', loadActionApprovals);
+  $('#approval-admin-save')?.addEventListener('click', async () => {
+    const ids = [...new Set(String($('#approval-admins')?.value || '').split(/[,，\s]+/).filter(Boolean))];
+    if (ids.some((id) => !/^\d{1,15}$/.test(id))) return setApprovalStatus('请填写有效的 QQ 号码');
+    try {
+      await api('/api/config', { method: 'POST', body: JSON.stringify({ security: { ...c.security, adminUserIds: ids } }) });
+      c.security ||= {}; c.security.adminUserIds = ids; setApprovalStatus('管理员已保存');
+    } catch (error) { setApprovalStatus(error.message); }
+  });
+  loadActionApprovals();
+}
+
 function bindSettingsEvents(c) {
+  if (state.settingsSection === 'approvals') bindActionApprovalsSettings(c);
   /* ── 即时保存：任何设置项变动 → 防抖 600ms 自动保存 ──
      变动的设置块背景变成流动的浅黄色渐变（.dirty-glow）。
      黄条的消退时机：**切换设置区块或主页签时**（renderSettings 重渲染会重建

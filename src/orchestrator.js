@@ -21,7 +21,7 @@ import { getToolAvailability } from './tool-registry.js';
 import { rescueUnsentReply } from './reply-rescue.js';
 
 export class Orchestrator {
-  constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null }) {
+  constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null, approvals = null }) {
     this.store = store;
     this.memory = memory;
     this.stickers = stickers;
@@ -29,6 +29,7 @@ export class Orchestrator {
     this.sessions = sessions;
     this.onebot = onebot;
     this.reminders = reminders;   // ReminderStore（可选；闹钟/计时功能）
+    this.approvals = approvals;
     this.videoReader = videoReader; // VideoReader（可选；视频读取功能）
     // 事件出口：正常情况下由 app.js 注入（转发到 SSE）。
     // 兜底必须是**明确的 no-op** —— 早先用 createEventBus() 兜底，
@@ -913,7 +914,8 @@ export class Orchestrator {
       store: this.store,
       memory: this.memory,
       stickers: this.stickers,
-      sender: this.sender,
+      sender: this.sender.forSession?.(session, this.emit) || this.sender,
+      actions: this.approvals?.forSession(session, triggerEntries),
       session,
       reminders: this.reminders,
       videoReader: this.videoReader,

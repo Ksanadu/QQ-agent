@@ -24,6 +24,7 @@
 //   4. 生命周期真实性：禁用一定调 deactivate，避免"开关关了但监听器还在"
 
 import fs from 'node:fs';
+import { extensionIds } from './extension-catalog.js';
 import path from 'node:path';
 import { format } from 'node:util';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -455,7 +456,7 @@ async function loadSkillDir(dir, { log = console.log, kind = null } = {}) {
 }
 
 /** 扫描一个目录下的所有 Skill。 */
-async function loadSkillRoot(rootDir, { log = console.log, label = 'skill' } = {}) {
+async function loadSkillRoot(rootDir, { log = console.log, label = 'skill', conflicts = new Map() } = {}) {
   if (!fs.existsSync(rootDir)) {
     // 不再静默：目录找不到必须打日志（历史上这里返回 missing 后被丢弃，
     // 表现为"安装版一个 Skill 都没有，且日志里毫无线索"）。
@@ -473,6 +474,17 @@ async function loadSkillRoot(rootDir, { log = console.log, label = 'skill' } = {
   const results = [];
   const kind = kindOfDir(rootDir);
   for (const dir of dirs) {
+    const found = readManifest(dir);
+    const id = String(found.raw?.id || path.basename(dir));
+    if (conflicts.has(id)) {
+      const error = `扩展 ID 冲突 ${id}：${conflicts.get(id).join('；')}。请移除重复副本后刷新`;
+      skillManager.unregister(id, { reason: 'duplicate-id' });
+      const { manifest } = normalizeManifest(found.raw || { id }, { fallbackId: id });
+      skillManager.register({ manifest, dir, source: found.source, kind, toolIds: [], providers: {}, hooks: {}, loadError: error });
+      log(`[${label}] ❌ ${error}`);
+      results.push({ dir, id, loaded: false, error });
+      continue;
+    }
     // 逐个串行加载：并行 import 时若两个 Skill 抢同一 id，顺序不确定
     results.push(await loadSkillDir(dir, { log, kind }));
   }
@@ -490,8 +502,9 @@ export async function loadPlugins({ log = console.log, roots = null } = {}) {
   const skillsRoot = roots?.skills ? path.resolve(roots.skills) : SKILLS_DIR;
   const pluginsRoot = roots?.plugins ? path.resolve(roots.plugins) : PLUGINS_DIR;
   skillManager.setLog(log);
-  const skillRes = await loadSkillRoot(skillsRoot, { log, label: 'skill' });
-  const pluginRes = await loadSkillRoot(pluginsRoot, { log, label: 'plugin' });
+  const conflicts = new Map([...extensionIds([skillsRoot, pluginsRoot])].filter(([, dirs]) => dirs.length > 1));
+  const skillRes = await loadSkillRoot(skillsRoot, { log, label: 'skill', conflicts });
+  const pluginRes = await loadSkillRoot(pluginsRoot, { log, label: 'plugin', conflicts });
   // 与磁盘对齐：把已经不存在于任何目录里的 Skill 卸掉（开发期删目录/改名的幽灵残留）。
   // 注意"存活集合"包含加载失败的 id —— 文件还在只是这次没加载成功，不触发卸载。
   // 加载失败的 Skill 现在分两种：
@@ -521,6 +534,7 @@ export async function loadPlugins({ log = console.log, roots = null } = {}) {
     loaded: [...skillRes.loaded, ...pluginRes.loaded],
     failed: [...skillRes.failed, ...pluginRes.failed],
     pruned,
+    conflicts: [...conflicts].map(([id, dirs]) => ({ id, dirs })),
     dirs: { skills: skillsRoot, plugins: pluginsRoot }
   };
 }

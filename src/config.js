@@ -150,6 +150,7 @@ export const DEFAULT_CONFIG = {
   },
   // 安全例外（默认全部关闭）
   security: {
+    adminUserIds: [], // QQ confirmations require an explicitly configured administrator.
     allowPrivateImageHosts: false,          // true 时图片下载允许内网地址（仅本地测试/自建图床）
     // ── 浏览锁定 ──
     // ── 浏览锁定 ──

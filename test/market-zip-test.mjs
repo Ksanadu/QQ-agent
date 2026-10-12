@@ -40,9 +40,9 @@ const { unzipToModuleDir, validateZipStructure } = await import('../src/zip-inst
 // 造一个假 skill 目录
 const skillDir = path.join(tmp, 'fake-skill');
 fs.mkdirSync(skillDir, { recursive: true });
-fs.writeFileSync(path.join(skillDir, 'skill.json'), JSON.stringify({ id: 'fake-skill', name: '假技能' }));
+fs.writeFileSync(path.join(skillDir, 'skill.json'), JSON.stringify({ id: 'fake-skill', name: '假技能', entry: 'lib/index.js' }));
 fs.mkdirSync(path.join(skillDir, 'lib'), { recursive: true });
-fs.writeFileSync(path.join(skillDir, 'lib', 'index.js'), 'export function setup() {}\n'.repeat(50));
+fs.writeFileSync(path.join(skillDir, 'lib', 'index.js'), 'export function setup() {}\n' + '// padding\n'.repeat(50));
 const bigContent = 'x'.repeat(100000);
 fs.writeFileSync(path.join(skillDir, 'big.txt'), bigContent);
 
@@ -63,11 +63,17 @@ await check('解压后内容与原目录一致（含大文件 CRC 校验）', as
   assert.equal(fs.readFileSync(path.join(out, 'big.txt'), 'utf8'), bigContent);
 });
 
-await check('同目录冲突时自动改名 _1', async () => {
+await check('同 ID 重装须明确替换，不能生成 _1；替换会备份旧代码', async () => {
   const root = path.join(tmp, 'root');
-  const name2 = await unzipToModuleDir(zipBuffer, { root, type: 'skill', preferId: 'fake-skill' });
-  assert.equal(name2, 'fake-skill_1', `第二次安装应改名，实际 ${name2}`);
-  assert.ok(fs.existsSync(path.join(root, 'skills', 'fake-skill_1', 'skill.json')));
+  await assert.rejects(unzipToModuleDir(zipBuffer, { root, type: 'skill', preferId: 'fake-skill' }), /已安装/);
+  assert.ok(!fs.existsSync(path.join(root, 'skills', 'fake-skill_1')));
+  const old = path.join(root, 'skills', 'fake-skill', 'local.txt');
+  fs.writeFileSync(old, 'original local code');
+  const name2 = await unzipToModuleDir(zipBuffer, { root, type: 'skill', preferId: 'fake-skill', replaceExisting: true });
+  assert.equal(name2, 'fake-skill');
+  const backup = fs.readdirSync(path.join(root, '.extension-backups'))[0];
+  assert.equal(fs.readFileSync(path.join(root, '.extension-backups', backup, 'local.txt'), 'utf8'), 'original local code');
+  assert.ok(!fs.existsSync(old));
 });
 
 await check('plugin 类型落到 plugins/ 目录', async () => {
@@ -85,6 +91,7 @@ await check('zip 根目录剥离：服务端格式 <id>/... 剥掉一层', async
   const stage = path.join(tmp, 'stage', 'fake-skill');
   fs.mkdirSync(stage, { recursive: true });
   fs.writeFileSync(path.join(stage, 'plugin.json'), '{"id":"fake-skill"}');
+  fs.writeFileSync(path.join(stage, 'index.js'), 'export function setup() {}');
   const zipped = await __zipDirectory(path.dirname(stage));   // 打包 fake-skill 目录本身 → 条目带 fake-skill/ 前缀
   const root = path.join(tmp, 'root-prefixed');
   const name = await unzipToModuleDir(zipped, { root, type: 'skill' });

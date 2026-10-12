@@ -49,3 +49,13 @@ release/
 community.key
 
 .goal-baseline/
+
+# User-installed extensions, personal helper scripts, and installation staging.
+/skills/
+/plugins/
+/tools/
+/data-*/
+.extension-backups/
+.module-install-*/
+/start-snowluma.ps1
+/stop-snowluma.ps1

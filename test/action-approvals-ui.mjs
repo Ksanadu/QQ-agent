@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { JSDOM } from 'jsdom';
+const dom = new JSDOM('<main id="root"></main>', { runScripts: 'outside-only', url: 'http://127.0.0.1:3210' });
+const { window } = dom;
+const renderFile = fs.readFileSync(new URL('../ui/app/06-settings-render.js', import.meta.url), 'utf8');
+const eventsFile = fs.readFileSync(new URL('../ui/app/07-settings-events.js', import.meta.url), 'utf8');
+window.$ = (selector) => window.document.querySelector(selector);
+window.esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+window.eval(renderFile.slice(renderFile.indexOf('function renderActionApprovalsSection'), renderFile.indexOf('function renderSettingsSidebar')));
+window.eval(eventsFile.slice(eventsFile.indexOf('function setApprovalStatus'), eventsFile.indexOf('function bindSettingsEvents')));
+const config = {};
+window.$('#root').innerHTML = window.renderActionApprovalsSection(config);
+let requests = [], approved = false;
+window.api = async (url, options) => {
+  requests.push({ url, options });
+  if (url === '/api/action-approvals') return { operations: [{ id: '123456789A', status: approved ? 'done' : 'pending', chatKey: 'group:100', actorId: '900', targets: [{ label: '<unsafe label>' }] }] };
+  if (url.endsWith('/approve')) { approved = true; return {}; }
+  if (url === '/api/config') return {};
+  throw Error('Unexpected request ' + url);
+};
+window.bindActionApprovalsSettings(config);
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+await tick();
+assert.ok(window.$('[data-decision="approve"]')); assert.equal(window.$('unsafe'), null);
+window.$('#approval-admins').value = 'not-a-number';
+window.$('#approval-admin-save').click(); await tick();
+assert.match(window.$('#approval-status').textContent, /有效/);
+assert.equal(requests.filter((r) => r.url === '/api/config').length, 0);
+window.$('#approval-admins').value = '900, 901';
+window.$('#approval-admin-save').click(); await tick();
+assert.deepEqual([...config.security.adminUserIds], ['900', '901']);
+assert.match(window.$('#approval-status').textContent, /已保存/);
+window.$('[data-decision="approve"]').click(); await tick();
+assert.equal(approved, true); assert.equal(window.$('[data-decision="approve"]'), null);
+assert.equal(requests.filter((r) => r.url.endsWith('/approve')).length, 1);
+dom.window.close();
+console.log('✓ approval controls validate admins, escape labels, submit once and refresh completed state');

@@ -847,10 +847,18 @@ function openInstallCodeModal() {
     for (const r of ready) {
       statusBox.textContent = `正在安装 ${installed + 1}/${ready.length}：${r.entry?.name || r.code}…`;
       try {
-        const res = await api('/api/market/install', {
-          method: 'POST',
-          body: JSON.stringify({ code: r.code, entry: r.entry })
+        const install = (replaceExisting = false) => api('/api/market/install', {
+          method: 'POST', body: JSON.stringify({ code: r.code, entry: r.entry, replaceExisting })
         });
+        let res;
+        try { res = await install(); }
+        catch (error) {
+          if (!String(error.message).includes('已安装；请选择更新替换或取消')) throw error;
+          if (!confirm('该扩展已安装。替换前会备份旧代码，设置保留。确定更新替换吗？')) {
+            notes.push(`${r.entry?.name || r.code} 已取消更新`); continue;
+          }
+          res = await install(true);
+        }
         installed++;
         notes.push(`${res.kind === 'plugin' ? '插件' : '技能'} ${res.id} 已安装`);
       } catch (e) {

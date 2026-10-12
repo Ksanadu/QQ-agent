@@ -116,7 +116,7 @@ try {
   ok('--check 可以正常运行');
 } catch (e) {
   const out = String(e.stdout || '') + String(e.stderr || '');
-  check(out.includes('CLIENT_BUILD'),
+  check(out.includes('CLIENT_BUILD') || (!fs.existsSync(path.join(ROOT, 'snowluma', 'index.mjs')) && out.includes('缺失')),
     '--check 会报告协议栈的 CLIENT_BUILD（排查版本问题时第一眼就能看到）',
     out.slice(0, 400));
 }

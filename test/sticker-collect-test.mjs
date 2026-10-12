@@ -26,6 +26,8 @@ import { createChecker, sleep } from './_harness.mjs';
 // ── 环境：临时数据目录（必须在 import src 模块之前设好）──────────────────
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-agent-sticker-'));
 process.env.QQ_AGENT_DATA_DIR = dataDir;
+const { updateConfig } = await import('../src/config.js');
+updateConfig({ allow: { groups: ['123'] } });
 fs.mkdirSync(path.join(dataDir, 'sticker-images'), { recursive: true });
 
 // 1x1 PNG 夹具

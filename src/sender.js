@@ -4,6 +4,8 @@
 // - Markdown → 纯文本、QQ 硬长度切分、CQ 转义
 // - 发出的每一条记进 ChatStore（self=true，供下一次运行当"自己的发言"）
 import fs from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { assertDeliveryAllowed } from './chat-policy.js';
 import { getConfig, DEFAULT_CONFIG } from './config.js';
 import { sleep, randInt, createSendChain, formatClockTime } from './util.js';
 import { mdToPlain, splitForQQ } from './md-to-plain.js';
@@ -42,6 +44,7 @@ export function toFileUri(input) {
 
 export class SendQueue {
   constructor({ onebot, store, onSent = null, log = null }) {
+    this.deliveryContext = new AsyncLocalStorage();
     this.onebot = onebot;
     this.store = store;
     this.onSent = onSent;
@@ -51,6 +54,29 @@ export class SendQueue {
     this.minuteTimes = new Map(); // chatKey -> [ts]
     this.hourTimes = new Map();   // chatKey -> [ts]
     this.recentSent = new Map();  // "chatKey::text" -> ts（发送去重窗口）
+  }
+
+  forSession(session, emit = () => {}) {
+    const sender = { recordsDeliveries: true };
+    for (const method of ['sendTextBatch', 'sendSticker', 'sendImage', 'sendMedia', 'poke']) {
+      sender[method] = (...args) => this.deliveryContext.run({ session, emit }, () => this[method](...args));
+    }
+    return Object.freeze(sender);
+  }
+
+  #guard(chatKey) {
+    assertDeliveryAllowed(chatKey, getConfig(), this.deliveryContext.getStore()?.session.chatKey || '');
+  }
+
+  #recordSent(receipt) {
+    const context = this.deliveryContext.getStore();
+    if (context) {
+      const { session, emit } = context;
+      session.sent.push({ type: receipt.kind || 'text', text: receipt.text, messageId: receipt.messageId,
+        to: receipt.chatKey, at: formatClockTime(Date.now()), sentAt: Date.now(), sessionId: session.id });
+      emit('session-update', session.id);
+    }
+    this.onSent?.(receipt);
   }
 
   #chain(chatKey) {
@@ -158,6 +184,7 @@ export class SendQueue {
       const isLast = i === parts.length - 1;
       const gap = this.#gap(text, isLast);
       promises.push(chain(async () => {
+        this.#guard(chatKey);
         this.#checkRate(chatKey);
         if (gap > 0) await sleep(gap);
         // 发送去重：窗口期内 identical 文本跳过（防模型重复调用/超时重试造成的重复发言）
@@ -165,6 +192,7 @@ export class SendQueue {
           console.warn(`[sender] 跳过重复消息（${this.#dedupeWindow()}ms 内已发过相同内容）：${String(text).slice(0, 30)}`);
           return { text, messageId: null, at: formatClockTime(Date.now()), deduped: true };
         }
+        this.#guard(chatKey);
         const data = await this.onebot.sendText(kind, id, text, {
           replyToMessageId: i === 0 ? options.replyToMessageId : null, // 引用挂在第一条上：回的就是那条
           atUserId: i === 0 ? options.atUserId : null
@@ -172,7 +200,7 @@ export class SendQueue {
         this.#markSent(chatKey, text);   // 只有 OneBot 成功返回后才记入去重窗口
         const ts = Date.now();
         this.store.appendSelf(chatKey, { text, ts, mid: data?.message_id ?? null });
-        this.onSent?.({ chatKey, text, messageId: data?.message_id ?? null });
+        this.#recordSent({ chatKey, text, messageId: data?.message_id ?? null });
         return { text, messageId: data?.message_id ?? null, at: formatClockTime(ts) };
       }));
     }
@@ -201,6 +229,7 @@ export class SendQueue {
     const [kind, id] = String(chatKey).split(':');
     const chain = this.#chain(chatKey);
     return chain(async () => {
+      this.#guard(chatKey);
       this.#checkRate(chatKey);
       await sleep(randInt(600, 1500)); // 发表情前真人式的短暂停顿
       // ── 发送回退链（修"表情包经常发送失败"）────────────────────────────
@@ -211,10 +240,10 @@ export class SendQueue {
       //   3. 空地址 —— 直接报错给模型
       // 失败自愈：http 直链失败时，用 OneBot get_image（拿协议端本地缓存）
       // 重发一次；再不行转成 base64 内联发（体积上限 15MB，超限明确报错）。
-      const sendVia = (ref) => this.onebot.sendSticker(kind, id, ref, {
+      const sendVia = (ref) => (this.#guard(chatKey), this.onebot.sendSticker(kind, id, ref, {
         replyToMessageId: options.replyToMessageId ?? null,
         atUserId: options.atUserId ?? null
-      });
+      }));
       let data;
       const primary = String(sticker.url || '').trim();
       if (!primary) throw new Error(`表情 ${sticker.id} 没有可发送的图片地址`);
@@ -260,7 +289,7 @@ export class SendQueue {
       }
       const ts = Date.now();
       this.store.appendSelf(chatKey, { text: `[表情包:${sticker.desc || sticker.localNote || sticker.id}]`, ts, mid: data?.message_id ?? null });
-      this.onSent?.({ chatKey, text: `[表情包]`, messageId: data?.message_id ?? null, sticker: sticker.id });
+      this.#recordSent({ chatKey, text: `[表情包:${sticker.desc || sticker.localNote || sticker.id}]`, messageId: data?.message_id ?? null, sticker: sticker.id, kind: 'sticker' });
       return { message_id: data?.message_id ?? null };
     });
   }
@@ -300,6 +329,7 @@ export class SendQueue {
     // 去重键优先用 URL；dataUrl 太长不适合当键，用长度 + 前 64 字符做指纹
     const dedupeKey = url || file || `data:${dataUrl.length}:${dataUrl.slice(0, 64)}`;
     return chain(async () => {
+      this.#guard(chatKey);
       if (this.#isDuplicate(chatKey, `__img__${dedupeKey}`)) {
         throw new Error('这张图刚刚发过，已跳过（避免重复刷屏）');
       }
@@ -308,6 +338,7 @@ export class SendQueue {
 
       let data;
       try {
+        this.#guard(chatKey);
         data = await this.onebot.sendImage(kind, id, ref, {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null
@@ -317,6 +348,7 @@ export class SendQueue {
         // 只在**有 dataUrl 备份**且**确实是 local 路径**时才回退，避免无意义重试。
         if (!file || !dataUrl) throw error;
         this.log?.(`本地路径发送失败（${error?.message ?? error}），回退 base64 重试一次`);
+        this.#guard(chatKey);
         data = await this.onebot.sendImage(kind, id, dataUrl, {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null
@@ -326,7 +358,7 @@ export class SendQueue {
       const ts = Date.now();
       const note = options.note ? `:${String(options.note).slice(0, 40)}` : '';
       this.store.appendSelf(chatKey, { text: `[图片${note}]`, ts, mid: data?.message_id ?? null });
-      this.onSent?.({ chatKey, text: `[图片${note}]`, messageId: data?.message_id ?? null, kind: 'image' });
+      this.#recordSent({ chatKey, text: `[图片${note}]`, messageId: data?.message_id ?? null, kind: 'image' });
       return { message_id: data?.message_id ?? null };
     });
   }
@@ -357,16 +389,18 @@ export class SendQueue {
       || label);
     const chain = this.#chain(chatKey);
     return chain(async () => {
+      this.#guard(chatKey);
       if (this.#isDuplicate(chatKey, `__media__${dedupeKey}`)) {
         throw new Error('这份媒体刚刚发过，已跳过（避免重复刷屏）');
       }
       this.#checkRate(chatKey);
       await sleep(randInt(800, 1800));   // 视频/多图体积大，停顿比文字长一点
+      this.#guard(chatKey);
       const data = await this.onebot.sendSegments(kind, id, segs);
       this.#markSent(chatKey, `__media__${dedupeKey}`);   // 成功后才记账
       const ts = Date.now();
       this.store.appendSelf(chatKey, { text: label, ts, mid: data?.message_id ?? null });
-      this.onSent?.({ chatKey, text: label, messageId: data?.message_id ?? null, kind: 'media' });
+      this.#recordSent({ chatKey, text: label, messageId: data?.message_id ?? null, kind: segs.some((seg) => seg.type === 'record') ? 'record' : segs.some((seg) => seg.type === 'file') ? 'file' : 'media' });
       return { message_id: data?.message_id ?? null };
     });
   }
@@ -375,15 +409,17 @@ export class SendQueue {
     const [kind, id] = String(chatKey).split(':');
     const chain = this.#chain(chatKey);
     return chain(async () => {
+      this.#guard(chatKey);
       // 拍一拍同样占发送配额 —— 曾经不调 #checkRate，模型连发 poke
       // 可以绕过 maxPerMinute/maxPerHour 刷屏
       this.#checkRate(chatKey);
       await sleep(randInt(300, 900));
+      this.#guard(chatKey);
       const data = await this.onebot.sendPoke(kind, id, targetUserId);
       const ts = Date.now();
       const target = kind === 'group' && targetUserId != null ? ` ${targetUserId}` : '对方';
       this.store.appendSelf(chatKey, { text: `[拍一拍] 你拍了拍${target}`, ts, mid: data?.message_id ?? null });
-      this.onSent?.({ chatKey, text: `[拍一拍]${target}`, messageId: null });
+      this.#recordSent({ chatKey, text: `[拍一拍]${target}`, messageId: null });
       return data;
     });
   }

@@ -27,6 +27,8 @@ import path from 'node:path';
 process.env.QQ_AGENT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-sendpath-'));
 
 const { SendQueue, toFileUri } = await import('../src/sender.js');
+const { updateConfig } = await import('../src/config.js');
+updateConfig({ allow: { groups: ['456', '457', '458', '459', '460', '461'] } });
 
 let bad = 0;
 const check = (label, fn) => {

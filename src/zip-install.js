@@ -6,6 +6,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { inflateRawSync } from 'node:zlib';
+import { extensionIds } from './extension-catalog.js';
+import { execFileSync } from 'node:child_process';
 
 const BANNED_EXT = /\.(exe|dll|bat|cmd|ps1|vbs|sh)$/i;
 const MAX_FILES = 100;
@@ -32,12 +34,11 @@ export function validateZipStructure(buffer) {
  * 目录名规则：
  *   · zip 里通常有一层与包同名的根目录（服务端打包格式 `<id>/...`），剥掉它
  *   · 没有统一根目录时用 preferId（服务器告知的 id）
- *   · 与本地已有目录冲突 → 自动 _1/_2（重装场景：同 id 覆盖会丢用户改动，
- *     而且插件热重载正在 watch 旧目录，覆盖写一半会加载出半截代码）
+ *   · 按清单 ID 识别已安装扩展；须明确替换，旧代码先备份，暂存校验后原子替换。
  *
  * @returns {Promise<string>} 实际落地的目录名
  */
-export async function unzipToModuleDir(buffer, { root, type, preferId = '' }) {
+export async function unzipToModuleDir(buffer, { root, type, preferId = '', replaceExisting = false }) {
   const entries = validateZipStructure(buffer);
   if (!entries.length) throw new Error('安装包是空的');
   const baseDir = path.join(root, type === 'plugin' ? 'plugins' : 'skills');
@@ -50,30 +51,52 @@ export async function unzipToModuleDir(buffer, { root, type, preferId = '' }) {
   const relNames = names.map((n) => n.slice(strip));
   if (relNames.some((n) => !n)) throw new Error('安装包结构异常（剥掉根目录后有条目为空）');
 
-  // 落地目录名：优先 zip 根目录名，其次 preferId
-  let dirName = strip ? firstSeg : (preferId || 'module');
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(dirName)) dirName = preferId || 'module';
-  // 冲突递增
-  let finalName = dirName;
-  for (let n = 1; n <= 100; n++) {
-    if (!fs.existsSync(path.join(baseDir, finalName))) break;
-    finalName = `${dirName}_${n}`;
+  const manifestEntry = relNames.findIndex((name) => name === 'skill.json' || name === 'plugin.json');
+  if (manifestEntry < 0) throw new Error('安装包缺少扩展清单');
+  const manifest = JSON.parse(entries[manifestEntry].data.toString('utf8').replace(/^\uFEFF/, ''));
+  const id = String(manifest.id || '');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id)) throw new Error('安装包扩展 ID 无效');
+  if (preferId && id !== preferId) throw new Error('安装包 ID 与市场条目不匹配');
+  const installed = extensionIds([path.join(root, 'skills'), path.join(root, 'plugins')]).get(id) || [];
+  if (installed.length > 1) throw new Error(`扩展 ID 冲突 ${id}：请先移除重复目录`);
+  if (installed.length && !replaceExisting) {
+    const error = new Error(`扩展 ${id} 已安装；请选择更新替换或取消`);
+    error.code = 'MODULE_EXISTS'; throw error;
   }
-  const target = path.join(baseDir, finalName);
-  fs.mkdirSync(target, { recursive: true });
+  const target = installed[0] || path.join(baseDir, id);
+  if (path.dirname(target) !== baseDir) throw new Error('同 ID 扩展已安装在另一种类型目录中，不能自动替换');
+  if (!installed.length && fs.existsSync(target)) throw new Error('目标目录已被占用，不能覆盖');
+  fs.mkdirSync(root, { recursive: true });
+  const stage = fs.mkdtempSync(path.join(root, '.module-install-'));
+  let backup = '';
+  try {
 
   for (let i = 0; i < entries.length; i++) {
     const rel = relNames[i];
     // 二次防线：拼接结果必须仍在 target 内（解析后 path.relative 检查）
-    const dest = path.join(target, ...rel.split('/'));
-    const relCheck = path.relative(target, dest);
+    const dest = path.join(stage, ...rel.split('/'));
+    const relCheck = path.relative(stage, dest);
     if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
       throw new Error(`安装包包含非法路径：${entries[i].name}`);
     }
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, entries[i].data);
   }
-  return finalName;
+    const entry = path.resolve(stage, manifest.entry || 'index.js');
+    const relative = path.relative(stage, entry);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(entry)) throw new Error('扩展入口缺失或越界');
+    execFileSync(process.execPath, ['--check', entry], { windowsHide: true, timeout: 5000, stdio: 'pipe' });
+    fs.mkdirSync(baseDir, { recursive: true });
+    if (installed.length) {
+      const backupRoot = path.join(root, '.extension-backups');
+      fs.mkdirSync(backupRoot, { recursive: true });
+      backup = path.join(backupRoot, `${id}-${Date.now()}-${path.basename(stage)}`);
+      fs.renameSync(target, backup);
+    }
+    try { fs.renameSync(stage, target); }
+    catch (error) { if (backup) fs.renameSync(backup, target); throw error; }
+    return path.basename(target);
+  } finally { if (fs.existsSync(stage)) fs.rmSync(stage, { recursive: true, force: true }); }
 }
 
 /** 极简 zip 读取器：中央目录定位 + 解压全部文件条目。不支持的特性直接抛错。 */

@@ -721,8 +721,8 @@ c.section('10. safe-fetch.js SSRF 防护');
     await assert.rejects(() => sf.validateImageUrl('http://127.0.0.1/x.png'), '内网图片地址应被拒');
   });
 
-  await c.check('validateFetchUrl：公网地址可通过（不做真实请求）', async () => {
-    const u = await sf.validateFetchUrl('https://example.com/page');
+  await c.check('validateFetchUrl：公网 IP 可通过（不依赖真实 DNS，不做请求）', async () => {
+    const u = await sf.validateFetchUrl('https://8.8.8.8/page');
     assert.ok(u, '公网 https 地址应通过校验');
   });
 }

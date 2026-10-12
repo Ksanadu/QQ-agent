@@ -84,6 +84,16 @@ export function createRoutes(deps) {
   };
 
   return [
+    { method: 'GET', pattern: '/api/action-approvals', handler: async ({ res, json }) => json(res, 200, { operations: deps.approvals.list() }) },
+    { method: 'POST', pattern: /^\/api\/action-approvals\/([A-F0-9]{10})\/(approve|cancel)$/,
+      handler: async ({ req, res, json, match }) => {
+        await bodyOf(req);
+        try {
+          const operation = match[2] === 'approve' ? await deps.approvals.approve(match[1], { via: 'console' }) : deps.approvals.cancel(match[1]);
+          return json(res, 200, { operation });
+        } catch (error) { return json(res, 409, { error: error.message }); }
+      }
+    },
     // ── 状态 / 数据目录 / 重置 ─────────────────────────────────────────
     {
       method: 'GET', pattern: '/api/status',
@@ -886,7 +896,7 @@ export function createRoutes(deps) {
         const code = String(body?.code || '').trim().toUpperCase();
         if (!/^[A-Z0-9]{4,12}$/.test(code)) return json(res, 400, { ok: false, error: '口令格式无效' });
         try {
-          const r = await installByCode({ code, verified: body?.entry || null });
+          const r = await installByCode({ code, verified: body?.entry || null, replaceExisting: body?.replaceExisting === true });
           // 安装完立即重扫，让新模块马上出现在页签里（热重载 watcher 也行，
           // 但目录删除重建的场景 watcher 会丢事件 —— reload 是唯一可靠路径）
           try { await reloadSkills({ reason: 'market-install' }); } catch { /* 重扫失败不影响安装结果 */ }

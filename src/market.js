@@ -287,7 +287,7 @@ export async function verifyInstallCodes(codes) {
  * @param {object} o { code, verified(校验阶段拿到的条目信息) }
  * @returns {Promise<{ok, kind, id, dir}>}
  */
-export async function installByCode({ code, verified }) {
+export async function installByCode({ code, verified, replaceExisting = false }) {
   const entry = verified && verified.ok ? verified : null;
   const type = String(entry?.type || '').toLowerCase() === 'plugin' ? 'plugin' : 'skill';
   // 先下载（没传 verified 也重新校验一次拿 type —— 不信任何本地猜测）
@@ -305,7 +305,7 @@ export async function installByCode({ code, verified }) {
   if (zipBuffer.length > MAX_ZIP_BYTES) throw new Error('安装包超过 8MB 上限');
   const { unzipToModuleDir, validateZipStructure } = await import('./zip-install.js');
   validateZipStructure(zipBuffer);
-  const dirName = await unzipToModuleDir(zipBuffer, { root: ROOT, type, preferId: ident });
+  const dirName = await unzipToModuleDir(zipBuffer, { root: ROOT, type, preferId: ident, replaceExisting });
   log('info', `口令 ${code} 安装完成：${type}s/${dirName}`);
   return { ok: true, kind: type, id: dirName, dir: path.join(ROOT, type === 'plugin' ? 'plugins' : 'skills', dirName) };
 }

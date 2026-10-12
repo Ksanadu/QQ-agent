@@ -34,6 +34,18 @@ function visionVerdictOf(providerId, model) {
 
 
 
+function renderActionApprovalsSection(c) {
+  return `<div class="setcard"><h3>表情删除批准</h3>
+    <p class="hint">机器人只能提出待删清单。在此批准后才会删除 QQ 收藏；删除不可恢复。</p>
+    <div class="field"><label for="approval-admins">允许在 QQ 确认的管理员 QQ 号</label>
+      <textarea id="approval-admins" rows="2">${esc((c.security?.adminUserIds || []).join(', '))}</textarea>
+      <div class="hint">多个号码以逗号分隔。留空时只能在此控制台批准。QQ 确认必须由请求本人发送“确认删除 操作码”。</div></div>
+    <button class="btn" id="approval-admin-save" type="button">保存管理员</button>
+    <button class="btn" id="approval-refresh" type="button">刷新待批准操作</button>
+    <p id="approval-status" class="hint" aria-live="polite"></p>
+    <div id="approval-list" aria-live="polite">正在读取…</div></div>`;
+}
+
 function renderSettingsSidebar() {
   const s = state.status;
   const sidebar = $('#settings-sidebar');
@@ -47,7 +59,8 @@ function renderSettingsSidebar() {
     ['chat', '聊天设置'],
     ['desktop', '桌面端'],
     ['onebot', 'OneBot（SnowLuma）'],
-    ['tools', '工具与技能']
+    ['tools', '工具与技能'],
+    ['approvals', '操作批准']
   ];
   sidebar.innerHTML = `
     <div class="settings-runstate">
@@ -162,7 +175,8 @@ function renderSettingsSection(c) {
     chat: () => renderChatSection(c),
     desktop: () => renderDesktopSection(c),
     onebot: () => renderOnebotSection(c),
-    tools: () => renderToolsSection(c)
+    tools: () => renderToolsSection(c),
+    approvals: () => renderActionApprovalsSection(c)
   };
   const render = sections[sec] || sections.api;
   return `
