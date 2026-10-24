@@ -118,13 +118,21 @@ export function currentProviders() {
   return (cfg.providers || []).map((p) => withResolvedKey(p, cfg));
 }
 
-/** 给指定提供商设置 API Key（存进配置的 dshProviderKeys，不动 providers 数组）。 */
+/** 更新提供商密钥，同时清理旧字段并同步当前连接的凭证。 */
 export function setProviderKey(providerId, apiKey) {
   const key = String(apiKey ?? '').trim();
-  const keys = { ...(getConfig().dshProviderKeys || {}) };
-  if (key) keys[providerId] = key;
-  else delete keys[providerId];
-  updateConfig({ dshProviderKeys: keys });
+  const cfg = getConfig();
+  if (!(cfg.providers || []).some((p) => p.id === providerId)) return null;
+  if (key === '******') return currentProviders().find((p) => p.id === providerId);
+  updateConfig({
+    dshProviderKeys: { [providerId]: key },
+    providers: cfg.providers.map((p) => {
+      if (p.id !== providerId) return p;
+      const { apiKey: legacy, ...rest } = p;
+      return rest;
+    }),
+    ...(cfg.api?.provider === providerId ? { api: { apiKey: key } } : {})
+  });
   return currentProviders().find((p) => p.id === providerId) || null;
 }
 

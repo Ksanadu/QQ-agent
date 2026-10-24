@@ -282,10 +282,10 @@ function openModelConfigModal() {
         <div class="hint" id="mc-test-result" style="margin-top:4px"></div></div>
       <div class="field-row">
         <div class="field"><label>当前 Base URL</label>
-          <input type="text" id="mc-baseurl" readonly value="${esc(c.api?.baseUrl || '')}" /></div>
+          <input type="text" id="mc-baseurl" value="${esc(c.api?.baseUrl || '')}" placeholder="https://api.example.com/v1" /></div>
         <div class="field"><label>当前 API Key</label>
           <div style="display:flex;gap:8px">
-            <input type="password" id="mc-apikey" value="${esc((currentProvider?.hasKey || c.api?.apiKey) ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
+            <input type="password" id="mc-apikey" value="${esc((currentProvider?.hasKey || c.api?.hasKey || c.api?.hasApiKey || c.api?.apiKey) ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
             <button class="btn btn-small" id="mc-apikey-toggle" type="button">显示</button>
             <button class="btn btn-small btn-danger" id="mc-apikey-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除</button>
           </div></div>
@@ -368,6 +368,13 @@ function openModelConfigModal() {
           <span class="muted" style="font-size:11px">${esc(m)}</span>
         </div>`).join('') || '<div class="muted" style="padding:10px">该提供商下没有模型</div>';
       pr.querySelectorAll('.mm-model').forEach((el) => el.addEventListener('click', () => {
+        const previousPid = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api?.provider;
+        if (previousPid !== activePid) {
+          const keyInput = overlay.querySelector('#mc-apikey');
+          keyInput.value = p.hasKey ? '******' : '';
+          keyInput.type = 'password';
+          overlay.querySelector('#mc-apikey-toggle').textContent = '显示';
+        }
         overlay.querySelector('#mc-model-pick').value = (names[el.dataset.model] || el.dataset.model);
         overlay.querySelector('#mc-picked').value = `${activePid}|||${el.dataset.model}`;
         overlay.querySelector('#mc-baseurl').value = p.baseURL || '';
@@ -439,24 +446,29 @@ function openModelConfigModal() {
     const input = overlay.querySelector('#mc-apikey');
     const btn = overlay.querySelector('#mc-apikey-toggle');
     const show = input.type === 'password';
+    // 新输入的 Key 直接切换可见性，不再用服务器上的旧 Key 覆盖它。
+    if (!show || input.value !== '******') {
+      input.type = show ? 'text' : 'password';
+      btn.textContent = show ? '隐藏' : '显示';
+      return;
+    }
     if (show) {
       try {
-        const pid = c.api?.provider;
+        const pid = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api?.provider;
+        const before = input.value;
         const r = pid ? await api(`/api/providers/key?providerId=${encodeURIComponent(pid)}`) : await api('/api/api-key');
+        const selectedPid = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api?.provider;
+        if (input.value !== before || selectedPid !== pid) return;
         input.type = 'text';
-        input.value = String(r.apiKey || '（无）');
+        input.value = String(r.apiKey || '');
         btn.textContent = '隐藏';
       } catch (e) { alert(`读取密钥失败：${e.message}`); }
-    } else {
-      input.type = 'password';
-      input.value = '******';
-      btn.textContent = '显示';
     }
   });
   overlay.querySelector('#mc-apikey-clear').addEventListener('click', async () => {
     if (!(await uiConfirm('确定清除已保存的 API Key？'))) return;
     try {
-      const pid = c.api?.provider;
+      const pid = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api?.provider;
       if (pid) {
         await api('/api/providers/set-key', { method: 'POST', body: JSON.stringify({ providerId: pid, apiKey: '' }) });
       } else {
@@ -479,12 +491,13 @@ function openModelConfigModal() {
     try {
       const picked = overlay.querySelector('#mc-picked').value;
       const model = picked ? picked.split('|||')[1] : (c.api?.model || '');
+      const providerId = picked ? picked.split('|||')[0] : (c.api?.provider || '');
       const keyInput = overlay.querySelector('#mc-apikey');
       const raw = (keyInput.value || '').trim();
       const apiKey = (raw && raw !== '******') ? raw : '';
       const r = await api('/api/providers/test-chat', {
         method: 'POST',
-        body: JSON.stringify({ baseUrl: overlay.querySelector('#mc-baseurl').value.trim(), apiKey, model })
+        body: JSON.stringify({ baseUrl: overlay.querySelector('#mc-baseurl').value.trim(), apiKey, model, providerId })
       });
       const res = r.result || {};
       out.textContent = res.ok ? `✓ 测试通过（${res.latencyMs}ms）` : `✗ ${res.note || '测试失败'}`;
@@ -497,7 +510,15 @@ function openModelConfigModal() {
 
   overlay.querySelector('#mc-cancel').addEventListener('click', () => closeModelModal(overlay));
   overlay.querySelector('#mc-save').addEventListener('click', async () => {
+    const baseUrl = overlay.querySelector('#mc-baseurl').value.trim().replace(/\/+$/, '');
+    try {
+      if (!/^https?:$/.test(new URL(baseUrl).protocol)) throw new Error();
+    } catch {
+      overlay.querySelector('#mc-test-result').textContent = '请填写有效的 HTTP 或 HTTPS Base URL';
+      return;
+    }
     const patch = {
+      baseUrl,
       vision: overlay.querySelector('#mc-vision').checked,
       video: overlay.querySelector('#mc-video').checked,
       videoMode: overlay.querySelector('#mc-video-mode').value
@@ -507,10 +528,6 @@ function openModelConfigModal() {
       const [pid, model] = picked.split('|||');
       patch.provider = pid;
       patch.model = model;
-      const p = (state.providers || []).find((x) => x.id === pid);
-      if (p?.baseURL) patch.baseUrl = p.baseURL;
-    } else if (overlay.querySelector('#mc-baseurl').value.trim() !== (c.api?.baseUrl || '')) {
-      patch.baseUrl = overlay.querySelector('#mc-baseurl').value.trim();
     }
     // 专用模型：dataset.model 里是干净的 id（没选过就删属性 = 走"保持原值"分支）
     const vEl = overlay.querySelector('#mc-vision-model-pick');

@@ -7,6 +7,7 @@
 // 重构说明：所有工具通过 registerTool() 注册到 tool-registry.js，
 // 支持在设置页按卡片勾选启用/禁用。
 import { getConfig } from './config.js';
+import { registerChatFeatureTools } from './chat-feature-tools.js';
 import { assertDeliveryAllowed } from './chat-policy.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
@@ -14,6 +15,9 @@ import { skillManager } from './skills/manager.js';
 import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } from './safe-fetch.js';
 import { webSearch, webFetch } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
+import { findMessageWithReply } from './message-replies.js';
+import { readForwardMessage } from './forward-messages.js';
+import { REACTION_EMOJIS } from './message-reactions.js';
 import { registerTool, listTools } from './tool-registry.js';
 import { holidayOn, upcomingHoliday } from './holidays.js';
 import { compressImage } from './image-compress.js';
@@ -140,6 +144,7 @@ function imageParts(text, dataUrls) {
 export function buildToolDefs() {
   // 确保所有工具已注册（幂等）
   registerAllTools();
+  registerChatFeatureTools();
   // 加载插件工具（如果还没加载）
   loadPluginTools();
   return listTools();
@@ -160,7 +165,7 @@ function registerAllTools() {
   registerTool({
     id: 'send_message',
     name: '发送消息',
-    description: '发送消息到当前聊天（本工具只能发到本次会话对应的群/私聊；要发到别处用 send_to）。messages 传字符串=发一条；传字符串数组=分多条发送（推荐，更像真人）。只有需要明确"我回的是哪条"时才传 replyToMessageId 引用；需要点名某人才传 atUserId。不要在字符串内部用空格分句。',
+    description: '发送消息到当前聊天（本工具只能发到本次会话对应的群/私聊；要发到别处用 send_to）。messages 传字符串=发一条（多数时候一句即可）；传字符串数组=分 1~2 条发送（需要递进时传数组，不要机械发多条）。只有需要明确"我回的是哪条"时才传 replyToMessageId 引用；需要点名某人才传 atUserId。不要在字符串内部用空格分句。',
     category: 'messaging',
     icon: '💬',
     parameters: {
@@ -383,7 +388,7 @@ function registerAllTools() {
   registerTool({
     id: 'collect_sticker',
     name: '收藏表情',
-    description: '收藏别人刚发的表情/图片到你的表情库（偶尔用，收藏前先 get_message_images 看图确认）。需要备注一句简短说明。',
+    description: '收藏别人刚发的表情/图片到你的表情库——特别可爱/好笑/戳你的才收（低频进货，宁缺毋滥），拿不准内容先 get_message_images 看图确认。note 写一句简短说明帮未来的你识别。',
     category: 'sticker',
     icon: '⭐',
     parameters: {
@@ -421,6 +426,29 @@ function registerAllTools() {
       } catch (error) {
         return err(error?.message ?? error);
       }
+    }
+  });
+
+  registerTool({
+    id: 'react_message',
+    name: '给消息贴表情',
+    description: '像 QQ 右键消息的“贴表情”一样，在某条消息下贴一个 QQ 表情回应。可按情绪、目的自行选择目标和表情，或配合文字回复。仅可操作【本轮可贴表情的消息】里的 ID：本轮触发消息＋首条触发消息之前最近 10 条同会话记录。按列表里的发送者选择，用户指定别人时不能改贴发指令的人；目标不在窗口/无法确定时说明并请其重新发出目标消息。指定表情不支持时不得擅自替换。每次调用一种表情，可多次调用，避免刷屏。set=false 只撤回自己的同种表情。',
+    category: 'messaging',
+    icon: '👍',
+    parameters: {
+      type: 'object',
+      properties: {
+        messageId: { type: ['integer', 'string'], description: '本轮可贴表情的消息 ID，可能为负数' },
+        emojiId: { type: 'string', enum: REACTION_EMOJIS.map((item) => item.id), description: REACTION_EMOJIS.map((item) => `${item.id}=${item.label}`).join('、') },
+        set: { type: 'boolean', description: 'true=贴上（默认），false=撤回自己的表情' }
+      },
+      required: ['messageId', 'emojiId']
+    },
+    async execute(ctx, args) {
+      try {
+        const result = await ctx.sender.reactMessage(ctx.chatKey, args);
+        return ok({ ...result, note: '操作已完成，不要发送“已贴表情”之类的汇报；需要文字回复时正常说话即可。' });
+      } catch (error) { return err(error?.message ?? error); }
     }
   });
 
@@ -490,7 +518,7 @@ function registerAllTools() {
   registerTool({
     id: 'read_forward',
     name: '展开转发消息',
-    description: '展开查看合并转发的聊天记录。消息文本出现 [合并转发聊天记录] 或 [转发消息 …] 占位符时用。参数填那条转发消息前的 #数字（千万别用方括号里那串长 id，会过期报错）。展开结果会写回存档，以后再看就是展开的文本，不用重复调。',
+    description: '展开查看合并转发的聊天记录。消息文本出现 [合并转发聊天记录] 或 [转发消息 …] 占位符时用。参数填当前会话那条转发消息前的 #数字（可为负数），程序会自动解析转发资源 ID，不要自行传长资源 ID。展开结果会写回存档，以后直接读取展开文本。确实读取失败时说明具体失败，不要用附近图片或其他消息冒充转发内容。',
     category: 'query',
     icon: '📨',
     parameters: {
@@ -508,8 +536,7 @@ function registerAllTools() {
         if (String(entry.text || '').startsWith('[合并转发 共')) {
           return ok({ messageId: entry.mid, text: entry.text, note: '该转发已展开（读的是存档）' });
         }
-        const r = await ctx.onebot.call('get_forward_msg', { message_id: Number(entry.mid) });
-        const nodes = Array.isArray(r?.messages) ? r.messages : [];
+        const nodes = await readForwardMessage({ onebot: ctx.onebot, messageId: entry.mid, chatKey: ctx.chatKey });
         const ex = await expandForwardNodes(nodes);
         if (!ex || !ex.text) return err('转发内容为空或已被 QQ 服务端丢弃（发送时间太久）');
         // 写回存档：一次展开，永久升级这条记录（模型/存档页/金句墙都受益）
@@ -583,15 +610,16 @@ function registerAllTools() {
       required: ['messageId']
     },
     async execute(ctx, args) {
-      const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
+      const entry = findMessageWithReply(ctx, args.messageId);
       if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
       return ok({
         messageId: entry.mid,
-        time: new Date(entry.ts).toLocaleString('zh-CN', { hour12: false }),
+        time: entry.ts ? new Date(entry.ts).toLocaleString('zh-CN', { hour12: false }) : '未知',
         sender: entry.self ? '我' : entry.senderName,
         senderId: entry.senderId,
         text: entry.text,
-        reply: entry.reply
+        reply: entry.reply,
+        truncated: Boolean(entry.truncated)
       });
     }
   });
@@ -610,14 +638,23 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       try {
-        const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
+        const entry = findMessageWithReply(ctx, args.messageId);
         if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
         const urls = (entry.media || []).filter((m) => m.kind === 'image' && m.url).map((m) => m.url);
-        if (!urls.length) return ok(`消息 ${args.messageId} 没有可查看的图片`);
+        if (!urls.length) return ok(`消息 ${args.messageId} 没有可查看的图片${entry.reply?.messageId ? `；它引用的是 #${entry.reply.messageId}，若要查看引用图片请使用该消息 ID` : ''}`);
         const results = [];
         const failed = [];
         for (const url of urls) {
-          try { results.push(await downloadImageAsDataUrl(url)); } catch (e) { failed.push(String(e?.message ?? e)); }
+          try {
+            let imageUrl = url;
+            const parsedUrl = new URL(url);
+            // QQ 图片默认取中等压缩图，避免直接读取大幅原图。
+            if (parsedUrl.hostname === 'multimedia.nt.qq.com.cn' && parsedUrl.pathname === '/download') {
+              parsedUrl.searchParams.set('spec', '720');
+              imageUrl = parsedUrl.toString();
+            }
+            results.push(await downloadImageAsDataUrl(imageUrl));
+          } catch (e) { failed.push(String(e?.message ?? e)); }
         }
         if (!results.length) return err(`图片获取失败：${failed.join('；')}`);
         const note = failed.length ? `（另有 ${failed.length} 张获取失败）` : '';

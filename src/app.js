@@ -26,6 +26,10 @@ import { startTelemetryLoop } from './telemetry.js';
 import { loadPlugins, watchPlugins } from './plugin-loader.js';
 import { skillManager } from './skills/manager.js';
 import { extractCandidateUrls, dispatchMediaLinks } from './media-links.js';
+import { parseImageCommand, dispatchImageCommand, imageMessageSegments } from './image-commands.js';
+import { loadImageReferences } from './image-references.js';
+import { resolveMessageReply } from './message-replies.js';
+import { readForwardMessage } from './forward-messages.js';
 import { createRoutes } from './routes.js';
 import * as instanceLockModule from './instance-lock.js';
 import { logger } from './logger.js';
@@ -799,29 +803,11 @@ export function createApp({ log = console.log } = {}) {
     return null;
   }
 
-  async function resolveReply(messageId) {
-    try {
-      const msg = await onebot.getMsg(messageId);
-      const senderName = msg?.sender?.card || msg?.sender?.nickname || '';
-      let text = '';
-      if (Array.isArray(msg?.message)) {
-        text = msg.message.map((s) => (s.type === 'text' ? s.data?.text ?? '' : `[${s.type}]`)).join('').trim();
-      } else if (typeof msg?.message === 'string') {
-        text = msg.message;
-      }
-      // senderId 一并带回：引用块显示为 名字(QQ:xxx)，与发言人标签同口径 ——
-      // 没有它，模型分不清引用的是"哪个张三"
-      return { sender: String(senderName), senderId: String(msg?.sender?.user_id ?? ''), text: String(text).slice(0, 120) };
-    } catch {
-      return null;
-    }
-  }
-
   async function ingestMessage(kind, id, event) {
     const cfgNow = getConfig();
     if (!allowed(kind, id, cfgNow)) return; // 白名单外的聊天完全不记录
 
-    const segments = Array.isArray(event.message) ? event.message : null;
+    const segments = imageMessageSegments(event.message ?? event.raw_message ?? '');
     const senderId = String(event.sender?.user_id ?? event.user_id ?? '');
     const senderName = String(event.sender?.card || event.sender?.nickname || senderId || '');
 
@@ -833,16 +819,54 @@ export function createApp({ log = console.log } = {}) {
       if (globalBlocked) return;
       if (kind === 'group' && (cfgNow.blocklist?.[id] || []).map(String).includes(senderId)) return;
     }
+
+    // Explicit image commands bypass chat batching; reference IO waits for the acknowledgement.
+    const imageCommand = parseImageCommand(event, onebot.selfId);
+    if (imageCommand) {
+      const chatKey = `${kind}:${id}`;
+      const capability = `media.image-command.${imageCommand.name}`;
+      const entry = store.appendIncoming(chatKey, {
+        mid: event.message_id, ts: event.time ? Number(event.time) * 1000 : Date.now(),
+        senderId: imageCommand.actorId, senderName, text: `/${imageCommand.name} ${imageCommand.request}`.trim(),
+        media: imageCommand.images.map((image) => ({ kind: 'image', ...image }))
+      });
+      store.markEntryRead(chatKey, entry.id);
+      emit('chat-update', chatKey);
+      const canSend = () => {
+        const fresh = getConfig();
+        if (orchestrator.paused || orchestrator.aborted || !allowed(kind, id, fresh) || isGloballyBlocked(imageCommand.actorId)) return false;
+        if (kind === 'group' && (fresh.blocklist?.[id] || []).map(String).includes(imageCommand.actorId)) return false;
+        if (!skillManager.hasCapability(capability)) return false;
+        for (const provider of skillManager.getCapabilityProviders('chat.ban-state', { chatKey, kind })) {
+          const ban = provider.fn({ chatKey, action: 'check' });
+          if (ban?.known && ban.muted) return false;
+        }
+        return true;
+      };
+      dispatchImageCommand({
+        command: imageCommand,
+        providers: skillManager.getCapabilityProviders(capability, { chatKey, kind }),
+        ctx: { chatKey, kind, sender, canSend,
+          loadImageReferences: (signal) => loadImageReferences({ command: imageCommand, chatKey, onebot, signal,
+            knownMessage: (mid) => store.recent(chatKey, { limit: 500 }).find((m) => String(m.mid) === String(mid))
+          })
+        }, log
+      });
+      return; // Already consumed: the ordinary LLM must not produce a second response.
+    }
     const media = segments ? extractMediaFromSegments(segments) : [];
 
     let text;
+    let reply = null;
     const atMarks = [];   // @ 段收集（qq + 渲染原文）：档位判定的权威依据（2026-09-26）
     if (segments) {
       text = await segmentsToText(segments, {
-        resolveReply: (mid) => resolveReply(mid),
+        resolveReply: (mid) => resolveMessageReply({ messageId: mid, chatKey: `${kind}:${id}`, store, onebot }),
+        onReply: (info) => { if (!reply) reply = info; },
         resolveAtName: (qq) => kind === 'group' ? resolveAtName(id, qq) : null,
         onAt: (m) => atMarks.push(m),
-        // 语音转写（`media.transcribe`）要用它去 get_record 取音频
+        // 原生 QQ 语音识别按实际入站消息 ID 调用。
+        voiceMessageId: event.message_id,
         onebot
       });
     } else {
@@ -850,14 +874,13 @@ export function createApp({ log = console.log } = {}) {
     }
 
     // 合并转发：占位符 → 展开真实内容（模型要读懂、看懂转发的聊天记录）
-    // 实测结论（2026-09-05，SnowLuma/NapCat）：get_forward_msg 只认 message_id；
-    // res_id（转发卡片里那个 id）会过期，报 "payload is empty"。
+    // 优先按真实 forward 段的资源 ID 读取，兼容负数消息 ID；失败后刷新卡片并回退。
     // 媒体里的 url 此时是新鲜的，一并收进 media（取图/金句都能用）。
     // 展开失败时占位符留在存档里，模型可用 read_forward 工具稍后重试。
     if (segments && (text.includes('[合并转发') || text.includes('[转发消息')) && event.message_id != null) {
       try {
-        const r = await onebot.call('get_forward_msg', { message_id: Number(event.message_id) });
-        const nodes = Array.isArray(r?.messages) ? r.messages : (Array.isArray(r?.data?.messages) ? r.data.messages : []);
+        const nodes = await readForwardMessage({ onebot, messageId: event.message_id,
+          message: segments, chatKey: `${kind}:${id}` });
         const ex = await expandForwardNodes(nodes);
         if (ex && ex.text) {
           text = ex.text;
@@ -913,6 +936,7 @@ export function createApp({ log = console.log } = {}) {
       senderId,
       senderName,
       text: text || '[图片]' ,
+      reply,
       media,
       atMe,
       atNames
@@ -1647,6 +1671,7 @@ export function createApp({ log = console.log } = {}) {
     try { pluginWatcher?.close?.(); } catch { /* ignore */ }
     pluginWatcher = null;
     await orchestrator.abortAll();
+    await skillManager.runHook('app-stop');
     orchestrator.stopReminderLoop();
     if (communitySyncTimer) clearInterval(communitySyncTimer);
     if (obPortPollTimer) clearInterval(obPortPollTimer);

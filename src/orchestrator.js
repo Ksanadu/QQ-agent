@@ -8,7 +8,9 @@
 //
 // 同一会话（群/私聊）同时最多一个运行；运行期间新消息只写 JSON（未读），不叠加触发。
 // 不同会话之间并行，受 maxConcurrentRuns 全局限流。
-import { getConfig, storeConfigForChat, personaForChat } from './config.js';
+import { getConfig, storeConfigForChat, personaForChat, commandMuteTier } from './config.js';
+import { chatAllowed } from './chat-policy.js';
+import { ConversationListeners } from './conversation-listener.js';
 import { vendorOfConfig } from './model-prices.js';
 import { randInt } from './util.js';
 import { buildSystemPrompt, buildUserPrompt, resolveContextTier } from './prompt.js';
@@ -19,10 +21,15 @@ import { currentProviders } from './providers.js';
 import { skillManager } from './skills/manager.js';
 import { getToolAvailability } from './tool-registry.js';
 import { rescueUnsentReply } from './reply-rescue.js';
+import { captureReactionTargets } from './message-reactions.js';
+import { ConversationTasks } from './conversation-tasks.js';
+import { ImageAlbum } from './image-album.js';
 
 export class Orchestrator {
   constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null, approvals = null }) {
     this.store = store;
+    this.tasks = new ConversationTasks();
+    this.imageAlbum = new ImageAlbum();
     this.memory = memory;
     this.stickers = stickers;
     this.sender = sender;
@@ -71,6 +78,29 @@ export class Orchestrator {
     this.aborted = false;
     this.reminderTimer = null;         // 提醒调度定时器
     this.reminderFiring = new Set();   // 防止同一提醒并发触发
+    this.listenerRelevant = new Map();
+    this.handledEntries = new Map();
+    this.listeners = new ConversationListeners({
+      onRelated: (chatKey, ids, reason) => this.#acceptListenerMessages(chatKey, ids, reason),
+      onCheck: (chatKey, state, event) => {
+        const sub = this.sessions.current.get(state.sessionId);
+        if (sub) {
+          addUsage(sub.usage, event.usage);
+          if (event.usage) sub.usage.calls++;
+          sub.messages.push({ listenerCheck: { ids: event.ids, related: event.related, reason: event.reason, error: event.error } });
+          this.sessions.update(sub.id); this.emit('session-update', sub.id);
+        }
+        this.emit('listener-check', { chatKey, related: event.related, ids: event.ids, reason: event.reason });
+      },
+      onClose: (chatKey, state, reason) => {
+        const sub = this.sessions.current.get(state.sessionId);
+        if (sub) {
+          sub.finishReason = reason; this.sessions.finish(sub.id, 'noreply');
+          this.emit('session-end', { sessionId: sub.id, chatKey, status: 'noreply', sent: 0, usage: sub.usage });
+        }
+        this.emit('listener-end', { chatKey, reason });
+      }
+    });
   }
 
   /**
@@ -166,6 +196,8 @@ export class Orchestrator {
    */
   onIncoming(chatKey, entry = null) {
     if (this.paused || this.aborted) return;
+    if (getConfig().conversationListener?.enabled === false || commandMuteTier(chatKey) !== null) this.listeners.stop(chatKey);
+    else if (entry && entry.atMe !== true) this.listeners.feed(chatKey, entry);
     // 运行中 / 倒计时中：消息保持未读（不判定、不重置），由会话结束的
     // drain 路径补判定（见 wake 末尾的 drain 注释）。
     if (this.runningChats.has(chatKey)) return;
@@ -288,7 +320,7 @@ export class Orchestrator {
    */
   #activeState(chatKey) {
     const cfg = getConfig();
-    if (cfg.chatActive?.enabled !== true) {
+    if (cfg.conversationListener?.enabled !== false || cfg.chatActive?.enabled !== true) {
       if (this.activeTopics.size) this.activeTopics.delete(chatKey);
       return null;
     }
@@ -433,7 +465,10 @@ export class Orchestrator {
       let batchFloorTs = Infinity;
       let hasTrigger = false;
       const active = this.#activeState(chatKey);
-      if (this.verifiedWakes.has(chatKey)) {
+      const approved = probe.filter(m => this.listenerRelevant.get(chatKey)?.has(m.id));
+      if (approved.length) {
+        batchFloorTs = Math.min(...approved.map(m => m.ts)); hasTrigger = true;
+      } else if (this.verifiedWakes.has(chatKey)) {
         if (waitingSessionId) {
           const waiting = this.sessions.current.get(waitingSessionId);
           if (waiting?.startedAt) batchFloorTs = Math.min(batchFloorTs, Number(waiting.startedAt) - 60_000);
@@ -526,7 +561,10 @@ export class Orchestrator {
     // 活跃期覆盖：必响应，读取条数与其余档位一致（统一 historyCount），
     // reason 标注活跃来源，会话页可解释"为什么 1 档设置却响应了"。
     const activeState = this.#activeState(chatKey);
-    const effectiveTier = activeState
+    const fromListener = triggerEntries.some(m => this.listenerRelevant.get(chatKey)?.has(m.id));
+    const effectiveTier = fromListener
+      ? { tier: 3, count: Math.max(0, Number(storeConfigForChat(chatKey).historyCount) || 80), reason: '关联监听：LLM 确认在继续当前对话', shouldRespond: true }
+      : activeState
       ? { tier: 3, count: Math.max(0, Number(storeConfigForChat(chatKey).historyCount) || 80), reason: `活跃期（话题：${activeState.topic}）`, shouldRespond: true }
       : tierResult;
 
@@ -572,6 +610,12 @@ export class Orchestrator {
       session = this.sessions.create({ chatKey, trigger: triggerEntries, triggerSummary });
       this.emit('session-start', { sessionId: session.id, chatKey, triggerSummary });
     }
+    session.followUpFromListener = fromListener;
+    const handled = this.handledEntries.get(chatKey) || new Set();
+    for (const m of triggerEntries) { handled.add(m.id); this.listenerRelevant.get(chatKey)?.delete(m.id); }
+    while (handled.size > 2000) handled.delete(handled.values().next().value);
+    this.handledEntries.set(chatKey, handled);
+    if (!proactive) this.#startListener(chatKey, session);
     this.activeRuns.set(chatKey, session.id);
     this.emit('chat-update', chatKey);
 
@@ -630,6 +674,9 @@ export class Orchestrator {
         }
       }
     } finally {
+      if (this.listeners.tasks.get(chatKey)?.parentSessionId === session.id) {
+        this.listeners.updateAnchor(chatKey, this.store.recent(chatKey, { limit: 20 }).filter(m => !m.recalled));
+      }
       this.activeRuns.delete(chatKey);
       this.runningChats.delete(chatKey);
       this.emit('chat-update', chatKey);
@@ -732,6 +779,9 @@ export class Orchestrator {
 
   async #runAgent(session, { kind, chatId, chatKey, triggerEntries, proactive, seq, contextLimit = null, tierInfo = null, activeTopic = null }) {
     const cfg = getConfig();
+    // 提示词和实际发送共用本轮固定窗口，运行中到达的新消息不能扩大权限。
+    const reactionMessages = captureReactionTargets({ triggerEntries, chatKey, store: this.store });
+    session.reactionTargets = reactionMessages;
     // 开一轮新运行：清空回复安全网的候选草稿池（草稿只在"这一次运行"内有意义，
     // 跨运行留着会把上一次的句子当成这次可以发的原句）。
     this.#capFirst('reply.grounded-select')?.({ reset: true });
@@ -824,6 +874,8 @@ export class Orchestrator {
     const userPrompt = buildUserPrompt({
       chatKey, kind, chatId, chatName,
       triggerEntries,
+      reactionMessages,
+      taskBindings: this.tasks.forTriggers(chatKey, triggerEntries, this.store),
       store: this.store,
       memory: this.memory,
       stickerEntries,
@@ -907,14 +959,19 @@ export class Orchestrator {
 
     const ctx = {
       chatKey, kind, chatId,
+      triggerEntries,
       selfId: this.onebot.selfId,
       selfNickname,
       botName: cfg.persona.botName,
       onebot: this.onebot,
       store: this.store,
+      tasks: this.tasks,
+      viewedMessageIds: [],
+      taskContextExplicit: false,
+      imageAlbum: this.imageAlbum,
       memory: this.memory,
       stickers: this.stickers,
-      sender: this.sender.forSession?.(session, this.emit) || this.sender,
+      sender: this.sender.forSession?.(session, this.emit, { reactionMessages }) || this.sender,
       actions: this.approvals?.forSession(session, triggerEntries),
       session,
       reminders: this.reminders,
@@ -1156,6 +1213,10 @@ export class Orchestrator {
         } catch (error) {
           skillManager.recordError('after-tool', error);
         }
+        if (!result.isError && ['get_message_images','get_message_detail','read_forward'].includes(name)) {
+          const id = safeParse(argsRaw)?.messageId;
+          if (id != null) ctx.viewedMessageIds.push(String(id));
+        }
         // 工具结果：文本走 tool 消息；媒体（parts 数组）不能塞进 tool 消息 ——
         // 很多 OpenAI 兼容端点不接受。做法：tool 消息只带文本，媒体随后以 user 消息补发
         // （[{type:'text'},{type:'image_url'|'video_url'}]），这是兼容面最广的多模态输入方式。
@@ -1251,6 +1312,43 @@ export class Orchestrator {
           } catch (error) { skillManager.recordError('reply-safety', error); }
         }
       }
+
+      // ── 核心交付收尾加固 ──
+      // 当本批工具已成功产生外部消息交付（如 send_message / send_sticker），
+      // 且本批调用的工具均为交付/副作用类动作、没有包含任何需要读取返回结果的查询型工具（如 web_search / get_recent_messages 等），
+      // 且没有发生报错，则直接终止多轮循环。
+      // 防止反代或某些模型在工具返回后继续触发无意义的多轮对话甚至自言自语死循环。
+      if (!finish) {
+        const hasNewSent = session.sent.length > sentBeforeBatch;
+        const hasErrors = toolResults.some((r) => r.isError);
+        if (hasNewSent && !hasErrors) {
+          const DELIVERY_ONLY_TOOLS = new Set([
+            'send_message',
+            'send_saved_image',
+            'share_bilibili_video',
+            'send_sticker',
+            'send_to',
+            'send_poke',
+            'react_message',
+            'collect_sticker',
+            'sticker_note',
+            'memory_append',
+            'memory_remove',
+            'set_reminder',
+            'cancel_reminder',
+            'report_feedback',
+            'finish'
+          ]);
+          const onlyDeliveryTools = toolCalls.every((call) => {
+            const name = call?.function?.name ?? '';
+            return DELIVERY_ONLY_TOOLS.has(name) || name.startsWith('tts-say') || name.startsWith('tts_say');
+          });
+          if (onlyDeliveryTools) {
+            finish = true;
+            session.finishReason = session.finishReason || '交付完成：消息已成功发出，自动收尾';
+          }
+        }
+      }
       messages.push(...toolResults.map(({ role, tool_call_id, name, content }) => ({ role, tool_call_id, content, name })));
       // 媒体消息跟随在全部 tool 结果之后（OpenAI 校验要求每个 tool_call 都有对应 tool 消息）
       messages.push(...imageUserMessages);
@@ -1259,6 +1357,10 @@ export class Orchestrator {
 
     // 收尾：发过话 = done；没发 = noreply（这是正常选项）
     const status = session.error ? 'error' : (session.sent.length > 0 ? 'done' : 'noreply');
+    if (status === 'done' && !ctx.taskContextExplicit) {
+      try { this.tasks.rememberInteraction(chatKey, triggerEntries, session.sent, ctx.viewedMessageIds, this.store); }
+      catch (e) { session.messages.push({ taskContextError: String(e.message).slice(0, 200) }); }
+    }
     this.sessionAbortControllers.delete(session.id);
     this.sessions.finish(session.id, status);
     this.emit('session-end', {
@@ -1838,10 +1940,45 @@ export class Orchestrator {
     this.proactiveTimer = null;
   }
 
+  #startListener(chatKey, parent) {
+    const cfg = getConfig();
+    if (cfg.conversationListener?.enabled === false || !chatKey.startsWith('group:') || commandMuteTier(chatKey) !== null) return;
+    const [kind, id] = chatKey.split(':');
+    if (!chatAllowed(kind, id, cfg)) return;
+    const state = this.listeners.start(chatKey, { config: cfg,
+      anchor: this.store.recent(chatKey, { limit: 20 }).filter(m => !m.recalled), parentSessionId: parent.id,
+      idleMs: Math.min(60000, Math.max(1000, Number(cfg.conversationListener?.idleMs) || 60000)) });
+    const sub = this.sessions.create({ chatKey, trigger: [], triggerSummary: '独立关联监听（闲置一分钟自动结束）' });
+    sub.taskType = 'conversation-listener'; sub.parentSessionId = parent.id;
+    sub.model = cfg.api.model; state.sessionId = sub.id;
+    parent.listenerSessionId = sub.id;
+    this.sessions.update(sub.id); this.sessions.update(parent.id);
+    this.emit('session-start', { sessionId: sub.id, chatKey, triggerSummary: sub.triggerSummary });
+  }
+
+  #acceptListenerMessages(chatKey, ids, reason) {
+    const cfg = getConfig(), [kind, id] = chatKey.split(':');
+    if (this.paused || this.aborted || cfg.conversationListener?.enabled === false || !chatAllowed(kind, id, cfg) || commandMuteTier(chatKey) !== null) return;
+    const approved = this.listenerRelevant.get(chatKey) || new Set();
+    let added = false;
+    for (const localId of ids) {
+      if (this.handledEntries.get(chatKey)?.has(localId)) continue;
+      const m = this.store.findByLocalId(chatKey, localId);
+      if (!m || m.self || m.recalled) continue;
+      if (this.store.markEntryUnread(chatKey, localId)) { approved.add(localId); added = true; }
+    }
+    this.listenerRelevant.set(chatKey, approved);
+    if (added) {
+      this.emit('listener-forward', { chatKey, ids: [...approved], reason });
+      if (!this.runningChats.has(chatKey) && !this.pendingWake.has(chatKey)) this.scheduleWake(chatKey, 200, { verified: true });
+    }
+  }
+
   // ── 控制接口 ───────────────────────────────────────────────────────────
 
   setPaused(paused, reason = 'manual') {
     this.paused = !!paused;
+    if (this.paused) { this.listeners.stopAll(); this.listenerRelevant.clear(); }
     this.pauseReason = this.paused ? reason : null;
     this.emit('status', { paused: this.paused, pauseReason: this.pauseReason });
   }
@@ -1865,6 +2002,12 @@ export class Orchestrator {
    */
   abortSession(sessionId) {
     const id = String(sessionId || '');
+    for (const [key, state] of this.listeners.tasks) {
+      if (state.sessionId === id || state.parentSessionId === id) {
+        this.listeners.stop(key, '用户中止监听'); this.listenerRelevant.delete(key);
+        if (state.sessionId === id) return { ok: true };
+      }
+    }
     if (!id) return { ok: false, reason: '缺少会话 id' };
     // 等待中：撤掉防抖定时器，让等待会话干净消失（不算"中止"，没花过 token）
     for (const [chatKey, waitingId] of this.pendingSessions.entries()) {
@@ -1899,6 +2042,7 @@ export class Orchestrator {
 
   async abortAll() {
     this.aborted = true;
+    this.listeners.stopAll(); this.listenerRelevant.clear();
     for (const timer of this.wakeTimers.values()) clearTimeout(timer);
     this.wakeTimers.clear();
     for (const timer of this.unreadFallbackTimers.values()) clearTimeout(timer);
@@ -1915,6 +2059,7 @@ export class Orchestrator {
       paused: this.paused,
       pauseReason: this.pauseReason ?? null,
       running: [...this.runningChats],
+      listeners: this.listeners.summary(),
       activeSessions: [...this.activeRuns.entries()].map(([chatKey, sessionId]) => ({ chatKey, sessionId })),
       consolidating: [...this.consolidating],
       onebotConnected: this.onebot.connected,

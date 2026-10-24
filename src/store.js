@@ -11,12 +11,13 @@
 //   text:      解析后的纯文本（[图片] 等占位符已内联）
 //   self:      是否是机器人自己发的
 //   read:      已读状态（运行开始时批量置 true）
-//   reply:     可选 { sender, text }：该消息引用/回复的对象摘要
+//   reply:     可选 { messageId, resolved, sender, senderId, text, media, ts }：绑定引用对象的快照（兼容旧摘要）
 //   media:     可选 [{ kind, url, file, faceId, summary }] 原始媒体定位信息
 // }
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
+import { searchChatHistory } from './chat-history.js';
 
 const MESSAGES_DIR = path.join(DATA_DIR, 'messages');
 
@@ -68,6 +69,10 @@ export class ChatStore {
       }
     } catch { /* 目录不存在 */ }
     return [...this.chats.keys()];
+  }
+
+  search(chatKey, options = {}) {
+    return searchChatHistory(this.#state(chatKey).messages, options);
   }
 
   getChatMeta(chatKey) {
@@ -198,6 +203,13 @@ export class ChatStore {
    * @param {number} id 消息条目的本地 id（appendIncoming 返回的 entry.id）
    * @returns {boolean} 是否真的标记了（false = 没找到/本来就是已读）
    */
+  markEntryUnread(chatKey, id) {
+    const st = this.#state(chatKey);
+    const entry = st.messages.find(m => m.id === id && !m.self && !m.recalled);
+    if (!entry) return false;
+    entry.read = false; saveChat(st); return true;
+  }
+
   markEntryRead(chatKey, id) {
     const st = this.#state(chatKey);
     const m = st.messages.find((x) => x.id === id);
@@ -245,6 +257,15 @@ export class ChatStore {
     // offset = 跳过最近 N 条（用于工具翻页）。只读，绝不能修改 st.messages！
     const start = Math.max(0, all.length - Math.max(0, Number(offset) || 0));
     return all.slice(0, start).slice(-Math.max(1, Number(limit) || 1));
+  }
+
+  /** 固定某条本地消息之前的窗口；后续新消息不会推移窗口。 */
+  recentBefore(chatKey, localId, { limit = 10 } = {}) {
+    const st = this.#state(chatKey);
+    const index = st.messages.findIndex((m) => m.id === Number(localId));
+    if (index < 0) return [];
+    const count = Math.max(0, Math.floor(Number(limit) || 0));
+    return st.messages.slice(Math.max(0, index - count), index);
   }
 
   findByMid(chatKey, mid) {

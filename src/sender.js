@@ -9,10 +9,17 @@ import { assertDeliveryAllowed } from './chat-policy.js';
 import { getConfig, DEFAULT_CONFIG } from './config.js';
 import { sleep, randInt, createSendChain, formatClockTime } from './util.js';
 import { mdToPlain, splitForQQ } from './md-to-plain.js';
+import { captureReactionTargets, validateMessageReaction } from './message-reactions.js';
 
 // 限频回退值统一取自 DEFAULT_CONFIG，杜绝"代码默认 80 / 回退值 8 / UI 回退 8"三处打架。
 const DEFAULT_MAX_PER_MINUTE = DEFAULT_CONFIG.send.maxPerMinute;
 const DEFAULT_MAX_PER_HOUR = DEFAULT_CONFIG.send.maxPerHour;
+
+// Background command jobs can be cancelled while waiting in the per-chat send chain.
+function assertPendingDelivery(options) {
+  options.signal?.throwIfAborted();
+  if (typeof options.canSend === 'function' && !options.canSend()) throw new Error('后台任务已取消或不再允许发送');
+}
 
 /**
  * 本地路径 → OneBot 能识别的 file URI。
@@ -54,12 +61,15 @@ export class SendQueue {
     this.minuteTimes = new Map(); // chatKey -> [ts]
     this.hourTimes = new Map();   // chatKey -> [ts]
     this.recentSent = new Map();  // "chatKey::text" -> ts（发送去重窗口）
+    this.reactionStates = new WeakMap(); // 每次运行内去重，不影响下一次回复。
   }
 
-  forSession(session, emit = () => {}) {
+  forSession(session, emit = () => {}, { reactionMessages = captureReactionTargets({
+    triggerEntries: session.trigger, store: this.store, chatKey: session.chatKey
+  }) } = {}) {
     const sender = { recordsDeliveries: true };
-    for (const method of ['sendTextBatch', 'sendSticker', 'sendImage', 'sendMedia', 'poke']) {
-      sender[method] = (...args) => this.deliveryContext.run({ session, emit }, () => this[method](...args));
+    for (const method of ['sendTextBatch', 'sendSticker', 'sendImage', 'sendMedia', 'poke', 'reactMessage']) {
+      sender[method] = (...args) => this.deliveryContext.run({ session, emit, reactionMessages }, () => this[method](...args));
     }
     return Object.freeze(sender);
   }
@@ -156,7 +166,7 @@ export class SendQueue {
 
   /**
    * 发送一批文本消息（一条或多条）。
-   * options: { replyToMessageId, atUserId }
+   * options: { replyToMessageId, atUserId, dedupeKey }
    * 返回 { sent: [{text, messageId}], failed: [{text, error}] }；全部失败时抛错。
    */
   async sendTextBatch(chatKey, messages, options = {}) {
@@ -181,6 +191,8 @@ export class SendQueue {
     const promises = [];
     for (let i = 0; i < parts.length; i++) {
       const text = parts[i];
+      // Explicit command replies are distinct per incoming request, even with identical wording.
+      const dedupeText = options.dedupeKey ? `__text__${options.dedupeKey}:${i}:${text}` : text;
       const isLast = i === parts.length - 1;
       const gap = this.#gap(text, isLast);
       promises.push(chain(async () => {
@@ -188,16 +200,17 @@ export class SendQueue {
         this.#checkRate(chatKey);
         if (gap > 0) await sleep(gap);
         // 发送去重：窗口期内 identical 文本跳过（防模型重复调用/超时重试造成的重复发言）
-        if (this.#isDuplicate(chatKey, text)) {
+        if (this.#isDuplicate(chatKey, dedupeText)) {
           console.warn(`[sender] 跳过重复消息（${this.#dedupeWindow()}ms 内已发过相同内容）：${String(text).slice(0, 30)}`);
           return { text, messageId: null, at: formatClockTime(Date.now()), deduped: true };
         }
         this.#guard(chatKey);
+        assertPendingDelivery(options);
         const data = await this.onebot.sendText(kind, id, text, {
           replyToMessageId: i === 0 ? options.replyToMessageId : null, // 引用挂在第一条上：回的就是那条
           atUserId: i === 0 ? options.atUserId : null
         });
-        this.#markSent(chatKey, text);   // 只有 OneBot 成功返回后才记入去重窗口
+        this.#markSent(chatKey, dedupeText);   // 只有 OneBot 成功返回后才记入去重窗口
         const ts = Date.now();
         this.store.appendSelf(chatKey, { text, ts, mid: data?.message_id ?? null });
         this.#recordSent({ chatKey, text, messageId: data?.message_id ?? null });
@@ -339,6 +352,7 @@ export class SendQueue {
       let data;
       try {
         this.#guard(chatKey);
+        assertPendingDelivery(options);
         data = await this.onebot.sendImage(kind, id, ref, {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null
@@ -349,6 +363,7 @@ export class SendQueue {
         if (!file || !dataUrl) throw error;
         this.log?.(`本地路径发送失败（${error?.message ?? error}），回退 base64 重试一次`);
         this.#guard(chatKey);
+        assertPendingDelivery(options);
         data = await this.onebot.sendImage(kind, id, dataUrl, {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null
@@ -402,6 +417,29 @@ export class SendQueue {
       this.store.appendSelf(chatKey, { text: label, ts, mid: data?.message_id ?? null });
       this.#recordSent({ chatKey, text: label, messageId: data?.message_id ?? null, kind: segs.some((seg) => seg.type === 'record') ? 'record' : segs.some((seg) => seg.type === 'file') ? 'file' : 'media' });
       return { message_id: data?.message_id ?? null };
+    });
+  }
+
+  /** QQ 消息贴表情：权限、范围、限频均在实际出站时再次检查。 */
+  reactMessage(chatKey, options) {
+    const context = this.deliveryContext.getStore();
+    const session = context?.session;
+    if (!session || session.chatKey !== chatKey) return Promise.reject(new Error('贴表情必须绑定当前回复会话'));
+    return this.#chain(chatKey)(async () => {
+      if (session.status && session.status !== 'running') throw new Error('本轮回复已结束或中止，不能再贴表情');
+      this.#guard(chatKey);
+      const result = validateMessageReaction({ ...options, targets: context.reactionMessages });
+      let states = this.reactionStates.get(session);
+      if (!states) { states = new Map(); this.reactionStates.set(session, states); }
+      const key = `${result.messageId}:${result.emojiId}`;
+      if (states.has(key) && states.get(key) === result.set) return { ...result, duplicate: true };
+      this.#checkRate(chatKey);
+      await this.onebot.call('set_msg_emoji_like', { message_id: result.messageId, emoji_id: result.emojiId, set: result.set });
+      states.set(key, result.set);
+      // 算一次已交付，单独贴表情即可结束；不伪造一条 QQ 文字消息进存档。
+      this.#recordSent({ chatKey, kind: 'reaction', messageId: result.messageId,
+        text: `[${result.set ? '贴表情' : '撤回表情'}] #${result.messageId} ${result.label}` });
+      return result;
     });
   }
 

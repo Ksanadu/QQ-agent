@@ -512,7 +512,9 @@ export function createRoutes(deps) {
         try {
           const body = await bodyOf(req);
           const submitted = String(body.apiKey ?? '').trim();
-          const apiKey = (submitted && submitted !== '******') ? submitted : resolveApiKey(getConfig());
+          const pid = String(body.providerId ?? '').trim();
+          const savedKey = pid ? currentProviders().find((p) => p.id === pid)?.apiKey || '' : resolveApiKey(getConfig());
+          const apiKey = (submitted && submitted !== '******') ? submitted : savedKey;
           const baseUrl = String(body.baseUrl ?? '');
           const model = String(body.model ?? '');
           const result = await testModelChat({ baseUrl, apiKey, model });

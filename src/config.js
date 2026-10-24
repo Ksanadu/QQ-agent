@@ -365,6 +365,8 @@ export const DEFAULT_CONFIG = {
   extensions: {
     hotReload: true
   },
+  // 被触发后开启独立 LLM 监听；仅相关消息可免 @ 继续，闲置一分钟自动退出。
+  conversationListener: { enabled: true, idleMs: 60000 },
   // 桌面端/控制台
   server: {
     // 端口：QQ_AGENT_PORT 显式覆盖 > 默认 3210 + PROFILE 偏移
@@ -595,6 +597,8 @@ function preserveSanitizedSecrets(current, patch) {
 export function updateConfig(patch) {
   const cleanPatch = stripDerivedFlags(structuredClone(patch ?? {}));
   const cleanObsolete = stripObsoleteFields(cleanPatch);
+  // 掩码只是界面占位符，不能覆盖已保存的明文。
+  if (cleanObsolete.api?.apiKey === '******') delete cleanObsolete.api.apiKey;
   // ── 脱敏回传的密钥保留（2026-09-19 修"搜索 Key 离开页签就消失"）──
   // 前端拿到的配置是脱敏的（apiKey 被删、hasApiKey 被加）；它把整个配置/区块
   // 回传保存时，密钥字段天然缺失。对**对象型**密钥容器 deepMerge 会保留基底值
@@ -605,6 +609,28 @@ export function updateConfig(patch) {
   // 回填现值；想真清除必须显式传 apiKey: ''（专用清除按钮就是显式空串路径）。
   preserveSanitizedSecrets(getConfig(), cleanObsolete);
   currentConfig = deepMerge(getConfig(), cleanObsolete);
+  // 模型配置编辑的是当前提供商的连接信息；聊天、模型目录和连通性测试
+  // 必须读到同一组 URL / Key，不能只改顶层却继续使用目录里的旧值。
+  const apiPatch = cleanObsolete.api;
+  const selected = (currentConfig.providers || []).find((p) => p.id === currentConfig.api?.provider);
+  if (apiPatch && selected) {
+    if (Object.hasOwn(apiPatch, 'baseUrl')) {
+      const baseUrl = String(apiPatch.baseUrl ?? '').trim().replace(/\/+$/, '');
+      currentConfig.api.baseUrl = baseUrl;
+      selected.baseURL = baseUrl;
+      selected.needsBaseUrl = !baseUrl;
+    }
+    if (Object.hasOwn(apiPatch, 'apiKey')) {
+      const key = String(apiPatch.apiKey ?? '').trim();
+      currentConfig.api.apiKey = key;
+      currentConfig.dshProviderKeys ||= {};
+      currentConfig.dshProviderKeys[selected.id] = key;
+      delete selected.apiKey;
+    } else if (Object.hasOwn(apiPatch, 'provider')) {
+      // 切换提供商时，旧提供商的顶层 Key 不能成为新提供商的回退凭证。
+      currentConfig.api.apiKey = String(currentConfig.dshProviderKeys?.[selected.id] || selected.apiKey || '');
+    }
+  }
   // 磁盘上可能已经存过历史遗留的派生标记，一并清掉
   stripDerivedFlags(currentConfig);
   stripObsoleteFields(currentConfig);

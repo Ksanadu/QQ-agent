@@ -1,6 +1,7 @@
 // OneBot v11 客户端：WebSocket 只收事件，HTTP API 负责发送与查询。
 // （原版经 @snowluma/sdk 收事件；这里直接实现标准 OneBot v11，去掉 SDK 补丁依赖。）
 import WebSocket from 'ws';
+import { transcribeQQVoice } from './qq-speech.js';
 import { assertProtectedAction } from './protected-actions.js';
 import { sanitizeUserText, escapeCqText } from './util.js';
 import { skillManager } from './skills/manager.js';
@@ -20,27 +21,6 @@ function normalizeInlineAt(text, atUserId, atName) {
     const fn = skillManager.getCapabilityProviders('message.inline-at-normalize')[0]?.fn;
     if (!fn || !atName) return null;
     return fn({ text, members: [{ userId: atUserId, nickname: atName }], atUserId }) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 语音转文字：走 `media.transcribe` 能力（speech-to-text 插件提供）。
- *
- * 返回 null 的三种情况都退回 `[语音]` 占位，等于"没装这个插件"：
- *   · 没有提供者（插件未启用 / 没配 whisper 路径）
- *   · 调用方没给 onebot 客户端（拿不到语音文件）
- *   · 识别失败（插件内部已吞错并 log，这里再兜一层）
- * 这样保证关掉插件行为完全回退，且识别失败绝不打断消息入库。
- */
-async function transcribeVoice(record, onebot) {
-  try {
-    const fn = skillManager.getCapabilityProviders('media.transcribe')[0]?.fn;
-    if (!fn || !onebot) return null;
-    const r = await fn({ record, onebot });
-    const text = String(r?.text ?? '').trim();
-    return r?.ok && text ? text : null;
   } catch {
     return null;
   }
@@ -358,7 +338,8 @@ export class OneBotClient {
 
   async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
-    segments.push({ type: 'image', data: { file: String(imageUrl) } });
+    // subType=1 请求协议端按"表情样式"渲染（小图气泡）；不支持该字段的实现会忽略它。
+    segments.push({ type: 'image', data: { file: String(imageUrl), subType: 1 } });
     return this.sendSegments(kind, id, segments);
   }
 
@@ -412,16 +393,72 @@ export function forwardIdFromData(d) {
 }
 
 /**
+ * 把 json 卡片段（QQ 分享卡片）解析成 AI 可读的一行文本。
+ *
+ * 背景：网易云/QQ音乐/B站等 App 的"分享到 QQ"都是 json 段，原来只显示
+ * `[卡片消息]` 四个字 —— 模型知道有卡，但歌名/歌手/链接全丢，只能装傻。
+ * 卡片结构（实测网易云手机版分享）：app=com.tencent.tuwen.lua 的通用 news 卡，
+ * meta.news 里带 title（歌名）/desc（歌手-专辑）/jumpUrl（含歌曲 id）/tag（App 名）。
+ *
+ * 刻意保持**同步、不联网**：ingest 路径上不能为一张卡去等接口；
+ * 字段是分享端就截断的显示文本（"…Wo…"），够模型理解语境，
+ * 拿全量信息走 netease/search 等工具（jumpUrl 里带 id）。
+ */
+export function describeJsonCard(dataStr) {
+  let card = null;
+  try { card = JSON.parse(String(dataStr ?? '')); } catch { return '[卡片消息]'; }
+  if (!card || typeof card !== 'object') return '[卡片消息]';
+  const app = String(card.app || '').trim();
+  const meta = card.meta ?? {};
+
+  const music = meta.music ?? meta.tencent_music ?? meta.music_163;
+  if (music && (music.title || music.jumpUrl)) {
+    const parts = ['[音乐卡片·', String(music.singer && !music.title ? music.singer : (music.tag || 'QQ音乐')), ']'];
+    if (music.title) parts.push(String(music.title));
+    if (music.singer && music.title) parts.push(` - ${music.singer}`);
+    if (music.desc && music.desc !== music.title && !music.singer) parts.push(`（${music.desc}）`);
+    if (music.jumpUrl) parts.push(` 链接: ${music.jumpUrl}`);
+    return parts.join('');
+  }
+
+  const news = meta.news;
+  if (news) {
+    const tag = String(news.tag || '').trim();
+    const parts = [`[卡片·${tag || app || '链接'}]`];
+    if (news.title) parts.push(` ${news.title}`);
+    if (news.desc && news.desc !== news.title) parts.push(` — ${news.desc}`);
+    if (news.jumpUrl) parts.push(` 链接: ${news.jumpUrl}`);
+    return parts.join('');
+  }
+
+  const prompt = String(card.prompt || '').trim();
+  if (prompt) return `[卡片消息·${app || '未知来源'}] ${prompt}`;
+  return `[卡片消息·${app || '未知来源'}]`;
+}
+
+/** 从 json 卡片段提取封面图（meta.news.preview 等），给模型看图用。 */
+export function cardCoverFromData(dataStr) {
+  try {
+    const card = JSON.parse(String(dataStr ?? ''));
+    const meta = card?.meta ?? {};
+    const pic = meta.news?.preview || meta.news?.image_url || meta.music?.picture || meta.miniapp?.iconUrl;
+    if (typeof pic === 'string' && /^https?:\/\//.test(pic)) return pic;
+  } catch { /* 非法 JSON 无封面 */ }
+  return null;
+}
+
+/**
  * 把 OneBot 消息段数组转成 AI 可读的纯文本。
- * resolveReply: async (mid) => { sender, text } | null —— 解析引用原文。
+ * resolveReply: async (mid) => { sender, senderId, text, media, resolved } | null —— 解析指定引用原文。
+ * onReply: (snapshot) => void —— 保存引用目标 ID 和完整快照；正文只显示简短预览。
  * resolveAtName: async (qq) => string | null —— 把 @ 的 QQ 号解析成群名片。
  * onAt: ({ qq, text }) => void —— @ 段收集器（2026-09-26）：文本包含匹配无法
  *   区分"同名不同人"，档位判定必须拿 @ 段里的 QQ 号说话；text 是渲染进正文的
  *   原片段（可能带 speaker-identity 的 (QQ:xxx) 后缀），关键词判定据此剔除。
- * onebot: OneBot 客户端，仅语音转写需要（`media.transcribe` 取语音文件用）；
+ * onebot: OneBot 客户端，配合 voiceMessageId 调用 QQ 原生语音识别；
  *         不传则语音保持 `[语音]` 占位。
  */
-export async function segmentsToText(segments, { resolveReply = null, resolveAtName = null, includeReply = true, onebot = null, onAt = null } = {}) {
+export async function segmentsToText(segments, { resolveReply = null, resolveAtName = null, includeReply = true, onebot = null, voiceMessageId = null, onAt = null, onReply = null } = {}) {
   if (typeof segments === 'string') return sanitizeUserText(segments.trim());
   const out = [];
   for (const seg of segments ?? []) {
@@ -448,10 +485,10 @@ export async function segmentsToText(segments, { resolveReply = null, resolveAtN
       case 'face': out.push(`[表情${d.id ?? ''}]`); break;
       case 'image': out.push('[图片]'); break;
       case 'record': {
-        // 语音转文字走 `media.transcribe` 能力（speech-to-text 插件提供）。
-        // 只在主消息路径转写（onebot 由调用方传入）：转发链里逐条跑 whisper
-        // 会把 ingest 串行阻塞住，代价不划算，那里保持占位符。
-        const spoken = onebot ? await transcribeVoice(d, onebot) : null;
+        let spoken = null;
+        if (onebot && voiceMessageId != null) {
+          try { spoken = await transcribeQQVoice(onebot, voiceMessageId); } catch { /* QQ 暂未识别时保留真实占位符 */ }
+        }
         out.push(spoken ? `[语音转文字] ${spoken}` : '[语音]');
         break;
       }
@@ -460,25 +497,29 @@ export async function segmentsToText(segments, { resolveReply = null, resolveAtN
       case 'reply': {
         if (!includeReply) break;
         let replyText = '';
+        let replyInfo = null;
+        const replyId = String(d.id ?? '');
         if (resolveReply) {
           try {
-            const info = await resolveReply(String(d.id));
+            const info = await resolveReply(replyId);
+            replyInfo = info;
             if (info?.sender || info?.text) {
               // 引用者名字带 QQ 号（与发言人标签同口径）：有 id 才拼，解析不到就不编造
               const senderLabel = info.senderId
                 ? `${info.sender}(QQ:${info.senderId})`
                 : info.sender;
               const parts = [];
-              if (senderLabel) parts.push(senderLabel);
-              if (info.text) parts.push(info.text);
+              parts.push(`${senderLabel || '消息'} #${replyId}`);
+              if (info.text) parts.push(String(info.text).replace(/\s+/g, ' ').slice(0, 160));
               replyText = `[引用 ${parts.join('：')}]`;
             }
           } catch { /* 解析失败降级 */ }
         }
-        out.push(replyText || '[引用消息]');
+        try { onReply?.({ ...replyInfo, messageId: replyId, resolved: replyInfo?.resolved ?? Boolean(replyInfo?.sender || replyInfo?.text) }); } catch { /* metadata must not block rendering */ }
+        out.push(replyText || `[引用 消息 #${replyId}：原文未获取，不要猜测引用对象]`);
         break;
       }
-      case 'json': out.push('[卡片消息]'); break;
+      case 'json': out.push(describeJsonCard(d.data)); break;
       case 'forward': {
         // 不带 res_id：那个 id 会过期（payload is empty），打出来只会误导模型拿它当参数。
         // 模型要看内容用 read_forward 工具 + 消息前的 #数字。
@@ -499,11 +540,17 @@ export function extractMediaFromSegments(segments) {
     const d = seg.data ?? {};
     if (seg.type === 'image') {
       media.push({ kind: 'image', file: String(d.file ?? ''), url: String(d.url ?? ''), summary: String(d.summary ?? '') });
+    } else if (seg.type === 'record') {
+      media.push({ kind: 'record', file: String(d.file ?? ''), url: String(d.url ?? '') });
     } else if (seg.type === 'video') {
       // 视频段：提取文件定位信息（供 read_video 工具读取）
       media.push({ kind: 'video', file: String(d.file ?? ''), url: String(d.url ?? ''), path: String(d.path ?? '') });
     } else if (seg.type === 'face') {
       media.push({ kind: 'face', faceId: String(d.id ?? '') });
+    } else if (seg.type === 'json') {
+      // 分享卡片自带的封面/预览图：给模型一个"亲眼看"的入口
+      const cover = cardCoverFromData(d.data);
+      if (cover) media.push({ kind: 'image', file: '', url: cover, summary: '[卡片封面]' });
     }
   }
   return media;
@@ -514,7 +561,7 @@ export function extractMediaFromSegments(segments) {
  *
  * 背景：OneBot 事件里的 forward 段只有一个 res_id 占位符，
  * 需要 get_forward_msg 拿回节点数组（本函数处理的就是这个数组）。
- * 实测 NapCat：{ message_id } 可用；res_id 会过期（payload is empty），别依赖。
+ * 读取入口由 forward-messages.js 处理资源 ID / message_id 兼容，此处只格式化节点。
  *
  * 规则：
  *   - 每个节点一行「昵称: 内容」，内容复用 segmentsToText（@/图片/表情等占位一致）

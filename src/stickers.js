@@ -82,7 +82,9 @@ export function mergeStickerLibrary(existing, fetched) {
       resId: String(item.resId || item.emoji_id || id).trim(),
       url: String(item.url || old?.url || '').trim(),
       md5: String(item.md5 || old?.md5 || '').trim().toUpperCase(),
-      desc: String(item.desc ?? old?.desc ?? '').trim(),
+      // desc 用 || 而不是 ??：fetch 返回空串时保留本地历史备注（QQ 端某些操作会把
+      // 收藏备注清空/不回传，?? 会把空串当有效值抹掉本地认知层）
+      desc: String(item.desc || old?.desc || '').trim(),
       localNote: old?.localNote || '',
       tags: old?.tags || [],
       usage: old?.usage || '',
@@ -102,7 +104,17 @@ export function mergeStickerLibrary(existing, fetched) {
       if (idx >= 0) out[idx] = merged;
     }
   }
-  return out.filter((e) => e.source !== 'qq' || fetchedIds.has(e.id));
+  // QQ 收藏是唯一事实源：同步成功后，QQ 侧已不存在的条目一律清掉——
+  // 不只 source==='qq' 的，collect_sticker 收来的（source==='ai' 且已入 QQ 收藏，有 emojiId）
+  // 用户在 QQ 里删掉后同样要清，否则"精简表情库"在机器人眼里永远不生效。
+  // 匹配用 id 或 emojiId 两个身份（collected_ 条目的 id 不在 QQ 列表里，靠 emojiId 认亲）。
+  // 只有从未入过 QQ 收藏的纯本地条目（无 emojiId）才豁免。
+  return out.filter((e) => {
+    if (fetchedIds.has(e.id) || (e.emojiId && fetchedIds.has(e.emojiId))) return true;
+    if (e.source === 'qq') return false;
+    if (e.emojiId) return false;
+    return true;
+  });
 }
 
 export function findSticker(entries, ref) {
@@ -142,11 +154,43 @@ export function formatStickerList(entries, query = '', limit = 48) {
 
 /**
  * 提示词里的【可用表情包】摘要（不暴露完整 URL，控制上下文体积）。
+ * - 展示去重：同一张图常以"QQ 原生 + collect 收录"两个身份并存（同 md5/同备注），只展示一份。
+ * - 展示顺序按小时轮换播种洗牌：列表内容稳定（利于缓存），顺序每小时变一次——
+ *   以前按使用次数排死序，模型总挑最前面的，是"反复发同一张"的半个根因。
+ * - 默认带 id：模型照抄 id 就能 send_sticker，不用先跑一轮 list_stickers 查号。
  * rotatePeriodMin <= 0 时关闭轮换；now 仅用于测试注入稳定的轮次。
- * withId 未显式设置时，max <= 15 才附带 id，避免提示词无谓膨胀。
  */
-export function buildStickerContext(entries, max = 10, { rotatePeriodMin = 60, now = Date.now(), withId = Number(max) <= 15 } = {}) {
-  const list = (Array.isArray(entries) ? entries : []).map(normalizeStickerEntry).filter(Boolean);
+export function buildStickerContext(entries, max = 10, { rotatePeriodMin = 60, now = Date.now(), withId = true } = {}) {
+  const list0 = (Array.isArray(entries) ? entries : []).map(normalizeStickerEntry).filter(Boolean);
+  // 双索引去重：QQ 原生条目有 md5，收藏副本常无 md5 只有 localNote——
+  // 只用单一键会漏掉"同图异身份"（md5 与 label 两个索引都要查/都要登记）。
+  const kept = [];
+  const byMd5 = new Map();
+  const byLabel = new Map();
+  const slotOf = new Map();
+  const register = (e, idx) => {
+    if (e.md5) byMd5.set(e.md5, e);
+    const label = e.desc || e.localNote;
+    if (label) byLabel.set(label, e);
+    slotOf.set(e, idx);
+  };
+  for (const e of list0) {
+    const label = e.desc || e.localNote;
+    const hit = (e.md5 && byMd5.get(e.md5)) || (label && byLabel.get(label)) || null;
+    if (!hit) {
+      register(e, kept.length);
+      kept.push(e);
+      continue;
+    }
+    // 同图双身份：优先保留本地转存（file:///）那份
+    if ((e.localFile ? 1 : 0) - (hit.localFile ? 1 : 0) > 0) {
+      const idx = slotOf.get(hit);
+      kept[idx] = e;
+      slotOf.delete(hit);
+      register(e, idx);
+    }
+  }
+  const list = kept;
   if (!list.length) return '';
   const total = Math.max(1, Math.min(30, Number(max) || 10));
   const byUse = [...list].sort((a, b) =>
@@ -154,27 +198,31 @@ export function buildStickerContext(entries, max = 10, { rotatePeriodMin = 60, n
     || ((b.desc || b.localNote) ? 1 : 0) - ((a.desc || a.localNote) ? 1 : 0)
     || String(a.id).localeCompare(String(b.id))
   );
-  let selected = byUse.slice(0, total);
 
-  if (Number(rotatePeriodMin) > 0 && list.length > total) {
+  const period = Math.max(0, Number(rotatePeriodMin)) * 60000;
+  const round = period > 0 ? Math.floor(Number(now) / period) : 0;
+  const seededShuffle = (arr, salt) => {
+    let seed = (round ^ salt) >>> 0;
+    for (const e of arr) for (const ch of String(e.id)) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    if (seed === 0) seed = 0x9e3779b9;
+    const out = [...arr];
+    for (let i = out.length - 1; i > 0; i--) {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      const j = seed % (i + 1);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+
+  let selected;
+  if (list.length > total) {
     const stableCount = Math.max(1, Math.floor(total / 2));
     const stable = byUse.slice(0, stableCount);
     const stableIds = new Set(stable.map((e) => e.id));
-    const pool = [...list].filter((e) => !stableIds.has(e.id)).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-    const period = Number(rotatePeriodMin) * 60000;
-    const round = Math.floor(Number(now) / period);
-    // 按轮次播种的 Fisher-Yates：同一轮次结果稳定，既利于缓存命中也便于测试断言。
-    // seed=0 时 xorshift 恒输出 0（j 恒为 0，洗牌失效）——用黄金比例常数兜底。
-    let seed = round >>> 0;
-    for (const e of pool) for (const ch of e.id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-    if (seed === 0) seed = 0x9e3779b9;
-    const shuffled = [...pool];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
-      const j = seed % (i + 1);
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    selected = [...stable, ...shuffled.slice(0, total - stableCount)];
+    const pool = list.filter((e) => !stableIds.has(e.id)).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    selected = [...stable, ...seededShuffle(pool, 0x1234).slice(0, total - stableCount)];
+  } else {
+    selected = seededShuffle(list, 0x5678);
   }
 
   const lines = selected.map((e) => {
@@ -196,17 +244,17 @@ export function buildStickerStrategyHint(level = 1) {
   // 合并成一处由档位直接改写频率行。
   // ⚠️ 索引严格对应 0~3 档，与 ui 的 STICKER_LEVELS 一致。
   const freqByLevel = [
-    '表情包是备选项，不勉强；纯文字回应完全没问题。',
-    '频率：普通闲聊不用每条都配；大约每 3~5 轮来一张就够，热闹/玩梗时可以更密，但不要连续刷屏。',
-    '频率：回应、吐槽、接梗时优先考虑配一个贴切的表情，让对话更有活人感；别每次都用同一张。',
-    '频率：你是表情包爱好者——能配表情的地方尽量配，接梗/调侃/附和时几乎都会带一张，聊天要有表情包的烟火气；注意换着用，不要连发同一张。'
+    '频率（0 档·不鼓励，<10%）：纯文字回应是绝对常态，绝大多数时候不发表情；只有极其贴切或无话可说时才偶尔单发一张。',
+    '频率（1 档·偶尔，约 20%~30%）：绝大多数时候只发纯文字文本（约七八成）；大约每 4~5 轮对话中才偶尔配一张贴切表情包，普通闲聊不要频繁带图。',
+    '频率（2 档·适度，约 50%）：约有一半时候只发纯文字，另一半（在有明显情绪起伏、反讽、接梗、卖萌或特别应景时）才配表情包（约 50% 概率）。绝不是每条发言都要配表情，禁止逢发必带。',
+    '频率（3 档·积极，约 80%）：你是表情包爱好者，大部分时候可以配图（约 75%~80% 概率），接梗/调侃时多带一张；但普通简短接话时依然允许纯文字，不要机械式每条必发。'
   ][Math.min(3, Math.max(0, Number(level) || 0))];
   return [
     '【表情包策略：像真人一样用，不刷屏】',
     '- 合适时机：被戳中笑点/槽点、接梗、怼人、赞同、自嘲、安慰、无语、赢了/输了、告别/晚安、别人发了表情时回一张，都可以自然用。',
     `- ${freqByLevel}`,
-    '- 选择：优先用备注（desc）和你的记忆（localNote/tags）能准确对上语境的；没有备注/不确定的表情，先 get_sticker_image 看图再决定，不要瞎发。',
-    '- 发送：用 send_sticker；一条消息只能是一张表情，不能在同一气泡里附带文字；想说的话先用 send_message 作为单独气泡发出，再单独发表情。',
+    '- 选择：闲聊/玩梗/接梗从备注或标签带「随便发」的万能可爱图里挑；要怼人/回击/对线/阴阳怪气时，从带「怼人」标签的里面挑。两个池子都换着发，别连续两张都是同一个；没有匹配/不确定的表情，先 get_sticker_image 看图再决定，不要瞎发。',
+    '- 发送：用 send_sticker（一条消息只能是一张表情，不能在同一气泡里附带文字）。如果你本轮决定配表情包且同时有话要说，可在同一轮同时调用 send_sticker 和 send_message；如果你决定不发表情，直接只调用 send_message 即可——绝不要把表情包当成发言标配，大部分时候纯文字交流最自然。',
     '- 不要：在严肃/正式/敏感话题硬塞表情；不要每次都用同一个；不要一条消息里塞多个表情；不要把文字和表情混在同一个气泡里。'
   ].join('\n');
 }

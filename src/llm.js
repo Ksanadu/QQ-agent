@@ -265,7 +265,7 @@ export async function chatCompletionWithRetry(args, retries = 2) {
  *    否则会出现"Skill 悄悄多打一次 API"这种既难发现又烧钱的问题。
  *    所以 Skill 只能给函数（改 body / 给建议），重试动作由本函数执行。
  */
-export async function chatCompletion({ messages, tools = null, toolChoice = 'auto', temperature = null, signal = null, overrides = null, skillContext = null, maxTokens = 0 }) {
+export async function chatCompletion({ messages, tools = null, toolChoice = 'auto', temperature = null, signal = null, overrides = null, skillContext = null, maxTokens = 0, responseFormat = null }) {
   const baseApi = overrides || effectiveApi();
   // 主调用路径才切"图片/视频专用模型"（见 specializedModelFor 注释）
   let api = baseApi;
@@ -303,6 +303,7 @@ export async function chatCompletion({ messages, tools = null, toolChoice = 'aut
       messages,
       stream: false
     };
+    if (responseFormat) body.response_format = responseFormat;
     if (tools && tools.length > 0) {
       body.tools = tools;
       body.tool_choice = toolChoice;
@@ -487,6 +488,36 @@ export async function chatCompletion({ messages, tools = null, toolChoice = 'aut
     reportPoolFeedback({ accountId: poolAccountId, ok: true, latencyMs: Date.now() - startedAt });
   }
   return result;
+}
+
+/** Structured read-only completion: correct malformed JSON once, before callers perform any action. */
+export async function chatCompletionJson(args, { validate = null } = {}) {
+  const originalMessages = args.messages;
+  const responseFormat = args.responseFormat || { type: 'json_object' };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    args.signal?.throwIfAborted();
+    const messages = attempt === 0 ? originalMessages : [...originalMessages, {
+      role: 'user', content: 'Your previous reply was not a complete valid JSON object matching the requested fields. Return one complete JSON object only. Keep the JSON concise. Close every string and brace. Preserve the original request and any refusal decision; do not change the task.'
+    }];
+    const result = await chatCompletion({ ...args, messages, responseFormat });
+    if (result.message?.refusal || result.finishReason === 'content_filter') {
+      const error = new Error('提示词模型拒绝请求');
+      error.code = 'LLM_CONTENT_REFUSED';
+      throw error;
+    }
+    const text = String(result.message?.content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    try {
+      const value = JSON.parse(text);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a JSON object');
+      if (validate) validate(value);
+      return { ...result, value, jsonAttempts: attempt + 1 };
+    } catch (cause) {
+      if (attempt === 0) continue;
+      const error = new Error(`模型 JSON 输出不完整或字段无效（${attempt + 1} 次，${text.length} 字符，结束原因 ${result.finishReason || 'unknown'}）`, { cause });
+      error.code = 'LLM_JSON_INVALID';
+      throw error;
+    }
+  }
 }
 
 /**

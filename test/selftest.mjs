@@ -423,7 +423,7 @@ refs:
   assert.strictEqual(send3.body.message[0].data.id, '9001');
   assert.strictEqual(send3.body.message[1].data.text, '收到');
   const replyRunReq = llm.state.requests.at(-2);
-  assert.ok(replyRunReq.messages[1].content.includes('[引用 被引用者：被引用的原话]'), '引用原文被解析进上下文');
+  assert.match(replyRunReq.messages[1].content, /\[引用 被引用者(?:\(QQ:\d+\))? #-?\d+：被引用的原话\]/, '引用 ID 与原文被解析进上下文');
   pass('引用解析与 reply 段发送正确');
 
   // ── 场景 5：群友印象跨运行持久（无状态但记忆保留，且按相关成员注入） ──

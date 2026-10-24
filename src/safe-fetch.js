@@ -76,7 +76,10 @@ export function isPrivateIp(ip) {
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
     if (parts[0] === 192 && parts[1] === 168) return true;
     if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
-    if (parts[0] === 198 && parts[1] >= 18 && parts[1] <= 19) return true;
+    // 198.18.0.0/15（RFC 2544 基准测试段）不拦：Clash/mihomo TUN 的 fake-ip 模式
+    // 把被代理域名解析成这段（如 QQ 图片 multimedia.nt.qq.com.cn → 198.18.x.x），
+    // 实连由 Clash 转发，不构成内网风险；拦了反而让 bot 看不到所有走代理的 QQ 图片。
+    // if (parts[0] === 198 && parts[1] >= 18 && parts[1] <= 19) return true;
     if (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) return true;
     if (parts[0] >= 224) return true;
     return false;

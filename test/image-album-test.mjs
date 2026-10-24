@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import { bootApp } from './_harness.mjs';
+const env = await bootApp({ config: { security: { allowPrivateImageHosts: true } } });
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+const server = http.createServer((req, res) => { res.writeHead(200, { 'content-type': req.url === '/bad' ? 'text/html' : 'image/png' }); res.end(req.url === '/bad' ? '<html>not an image</html>' : png); });
+await new Promise(r => server.listen(0, '127.0.0.1', r));
+try {
+  const { app } = env, url = `http://127.0.0.1:${server.address().port}/image`;
+  const source = app.store.appendIncoming('group:456', { mid: -44, senderId: '777', text: '[图片]', media: [{ kind: 'image', url }, { kind: 'image', url }] });
+  const { buildToolDefs } = await import('../src/tools.js'); const defs = buildToolDefs();
+  const ctx = { chatKey: 'group:456', store: app.store, imageAlbum: app.orchestrator.imageAlbum, sender: app.sender };
+  const tool = name => defs.find(t => t.id === name);
+  const saved = await tool('collect_chat_image').execute(ctx, { messageId: -44, title: '猫猫睡觉', tags: ['白猫', '可爱'], imageIndex: 2 });
+  assert.ok(!saved.isError, saved.content); const id = JSON.parse(saved.content).id;
+  const duplicate = await tool('collect_chat_image').execute(ctx, { messageId: -44, title: '猫猫睡觉', tags: ['午睡'] });
+  assert.equal(JSON.parse(duplicate.content).duplicate, true);
+  assert.equal(JSON.parse((await tool('search_saved_images').execute(ctx, { query: '白猫 午睡' })).content)[0].id, id);
+  assert.equal((await tool('get_saved_image').execute(ctx, { id })).content[1].type, 'image_url');
+  const { ImageAlbum } = await import('../src/image-album.js');
+  const reloaded = new ImageAlbum({ dir: ctx.imageAlbum.dir }); assert.equal(reloaded.search('group:456', '白猫').length, 1);
+  assert.deepEqual(fs.readFileSync(reloaded.get('group:456', id).path), png);
+  assert.throws(() => reloaded.get('group:789', id));
+  assert.equal((await tool('collect_chat_image').execute({ ...ctx, chatKey: 'group:789' }, { messageId: -44, title: '错图', tags: [] })).isError, true);
+  assert.equal((await tool('get_saved_image').execute(ctx, { id: '../../config.json' })).isError, true);
+  assert.equal((await tool('collect_chat_image').execute(ctx, { messageId: -44, title: '', tags: [], imageIndex: 3 })).isError, true);
+  let sent;
+  assert.ok(!(await tool('send_saved_image').execute({ ...ctx, sender: { sendImage: async (chatKey, image) => { sent = { chatKey, image }; return { message_id: -88 }; } } }, { id })).isError);
+  assert.equal(sent.chatKey, 'group:456'); assert.deepEqual(fs.readFileSync(sent.image.file), png);
+  await assert.rejects(ctx.imageAlbum.collect('group:456', { ...source, recalled: true }), /撤回/);
+  await assert.rejects(ctx.imageAlbum.collect('group:456', { ...source, media: [{ kind: 'image', url: url.replace('/image','/bad') }] }), /不是/);
+  await assert.rejects(ctx.imageAlbum.collect('group:456', { ...source, media: [{ kind: 'image', url: 'file:///secret.png' }] }), /http/);
+  assert.ok(!fs.readdirSync(ctx.imageAlbum.dir).some(f => f.endsWith('.tmp')));
+  console.log('PASS Phase 3: scoped collect/search/view/send, disk persistence and byte-perfect original, content dedupe, labels, multiple images, failed download cleanup and path/URL rejection');
+} finally { await env.teardown(); await new Promise(r => server.close(r)); }
