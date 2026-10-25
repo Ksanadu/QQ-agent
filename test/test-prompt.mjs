@@ -61,7 +61,7 @@ function makeStore() {
 
 // ── 1. 系统提示包含全部行为模块，且不包含已移除的沉睡/唤醒机制 ──
 const sys = buildSystemPrompt();
-for (const keyword of ['安全规则', '工作方式', '反 AI 味', '保持主体性', '该说/不该说', '群聊不是客服队列', '像真人一样', '引用与点名', '记忆', '表情包策略', '发送与汇报禁令']) {
+for (const keyword of ['安全规则', '工作方式', '引用与点名', '记忆', '表情包策略', 'QQ 场景规则', '消息贴表情']) {
   assert.ok(sys.includes(keyword), `系统提示缺少模块：${keyword}`);
 }
 for (const banned of ['沉睡前观察', 'qq_wait_for_messages', 'qq_set_wake_config', 'qq_mark_read', '[SILENT]', '会话令牌']) {

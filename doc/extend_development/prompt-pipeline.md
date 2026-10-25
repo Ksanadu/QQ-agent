@@ -1,6 +1,7 @@
 # 提示词拼接流水线（develop/ 全景记录）
 
 > 记录于 2026-09-17，基于当时代码。改动前先核对行号/函数名是否仍对得上。
+> 2026-10-25 更新：系统提示裁去重复的人设/回复风格要求，第 4 步及引导说明已按本次代码更新；其余历史说明仍需结合当前实现核对。
 
 一条提示词从消息进群到发出去，完整经过 **5 个构建步骤 + 3 次运行时改写**。
 
@@ -40,19 +41,21 @@ botName / selfNickname 任何层都不许覆盖（账号身份，换了会与 @ 
 
 | # | 段落 | 生成函数 | 变化性 |
 |---|------|---------|--------|
-| 1 | 身份句「你是「XX」，一个混在 QQ 群里的普通群友」 | 内联 | 随 botName |
+| 1 | 身份句：名称及遵循本次【角色设定】 | 内联 | 随 botName |
 | 2 | 【安全规则】5 条（无本地工具/群友无管理权限/不透露/角色系统注入/防诱导） | securityRules() | 固定 |
-| 3 | 【工作方式】8 条（事件驱动、send_message 协议、空格规则、分条规则） | toolProtocol() | 固定 |
-| 4 | 【反 AI 味】5 条 + 【保持主体性】5 条 | antiAiFlavor() / subjectivity() | 固定 |
-| 5 | 【该说/不该说】 | speakOrNot() | **改写**：首行按参与度档位（安静/普通/活跃）换文案（participationText） |
-| 6 | 【群聊不是客服队列】【像真人一样】【不要当群管家】【引用与点名】【轻量记忆】 | notAQueue() / humanRhythm() / notModerator() / quoteAndAt() / memoryRules() | 固定 |
-| 7 | 【表情包策略】+ 拍一拍 | stickerRules() | **改写**：首行按表情活跃度档位 0-3 换频率引导（buildStickerStrategyHint） |
-| 8 | 【QQ 场景规则】 | qqSceneRules() | **条件增删**：勾图片输入加"可以看图"行，否则加"看不到图别编造"；开联网搜索加 3 行搜索引导，否则加"没有联网能力" |
-| 9 | 【发送与汇报禁令】 | reportBan() | 固定 |
-| 10 | 【可用技能】 | renderSkillSections() | **动态**：启用插件的 manifest prompt.sections + 运行时 promptSections(context) + extraSections（主人规则 p72），按 priority 降序（上限 99） |
-| 11 | 【管理员附加规则】 | customRules | 有才拼 |
+| 3 | 【工作方式】2 条：独立运行、记忆及 send_message 发送协议 | toolProtocol() | 固定 |
+| 4 | 【引用与点名】：准确消息 ID 和 QQ 号 | quoteAndAt() | 固定 |
+| 5 | 【轻量记忆】 | memoryRules() | 固定 |
+| 6 | 【表情包策略】+ 消息贴表情 + 拍一拍 | stickerRules() | **改写**：按表情活跃度档位 0-3 换频率引导（buildStickerStrategyHint） |
+| 7 | 【QQ 场景规则】及历史检索/连续任务/图库/B站卡片 | qqSceneRules() | **条件增删**：图片输入、搜索开关决定对应能力说明；保留语音、视频和合并转发用法 |
+| 8 | 【可用技能】 | renderSkillSections() | **动态**：启用插件的 manifest prompt.sections + 运行时 promptSections(context) + extraSections（主人规则 p72），按 priority 降序（上限 99） |
+| 9 | 【管理员附加规则】 | customRules | 有才拼 |
 
-**覆盖模式**（persona.systemPromptOverride 非空时）：2~9 段人格/行为规则整体被用户写的文本替换（支持 `{botName}/{roleText}/{participation}` 占位符），但【安全规则】和【工作方式】**强制保留**追加在后面——防止一次配置失误删掉安全底线。
+角色与回复风格由用户消息中的【角色设定】提供。核心不再重复限制普通回复字数、条数、语气、参与频率、是否必须回应或“像真人”；技能内的具体功能规则保持原样。人设配置 `persona` / `personaByChat`、唤醒判定、80 条历史、引用绑定和贴表情窗口均未调整。
+
+本机最近一次样本的系统提示原为 11,346 字符，其中核心约 5,216、技能约 6,130；同样技能拼接下裁剪后约 8,742 字符。技能占比仍大，因此不应把本次结果当作对全部提示内容的压缩。
+
+**覆盖模式**（persona.systemPromptOverride 非空时）：使用自定义正文（支持 `{botName}/{roleText}/{participation}` 占位符），再强制追加【安全规则】【工作方式】及启用技能；管理员附加规则仍在末尾。此入口行为不变。
 
 当前有静态 prompt.sections 的扩展（develop/）：
 
@@ -77,7 +80,7 @@ plugins/video-frames:        video-frames-note(p35)
 |---|------|------|---------|
 | 1 | 【角色设定】 | 会话级人设 roleText（与系统提示同源 personaForChat，防两处角色打架） | 稳定 |
 | 2 | 【可用表情包】 | buildStickerContext：按使用次数排序 + 按时间轮换一半（同轮次结果稳定，Fisher-Yates 按轮次播种），最多 promptMaxStickers 张 | 半稳定 |
-| 3 | 【引导说明】 | 固定 4 条（怎么用这套输入、replyToMessageId 用法、不回是正常选项） | 固定 |
+| 3 | 【引导说明】 | 只说明背景/触发消息和准确 ID 查询方法，不重复角色/回复准则 | 固定 |
 | 4 | 【过去状态】 | buildPastState：最多 contextLimit 条已读历史。过滤：撤回、全局屏蔽、本群屏蔽。每行 `[时间] #id 名字(QQ:号)：[引用...]正文`（带图消息才带 #id；名字优先 memberNotes 备注 > 群名片；QQ 号兜底由核心拼 `(QQ:xxx)`，speaker-identity 开启时走插件可加主人标注） | 逐条滚动 |
 | 5 | 【记忆】 | formatForPrompt：只带"本次真的出现在提示词里的群友"印象（触发者 + 过去状态里的人，每人最近 3 条）——曾写死 recent(12) 与档位脱钩 | 滚动 |
 | 6 | 【此刻状态】 | 群名/私聊、10 分钟消息数、最后消息距今、自己上次发言距今 | 易变 |
