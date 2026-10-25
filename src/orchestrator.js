@@ -959,6 +959,7 @@ export class Orchestrator {
 
     const ctx = {
       chatKey, kind, chatId,
+      skillContext,
       triggerEntries,
       selfId: this.onebot.selfId,
       selfNickname,

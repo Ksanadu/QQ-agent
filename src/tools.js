@@ -19,6 +19,7 @@ import { findMessageWithReply } from './message-replies.js';
 import { readForwardMessage } from './forward-messages.js';
 import { REACTION_EMOJIS } from './message-reactions.js';
 import { registerTool, listTools } from './tool-registry.js';
+import { readSkillGuide, requireSkillGuide } from './skills/guides.js';
 import { holidayOn, upcomingHoliday } from './holidays.js';
 import { compressImage } from './image-compress.js';
 import { localStickerPath } from './sticker-manager.js';
@@ -161,6 +162,15 @@ function loadPluginTools() {
 
 /** 注册所有内置工具到 registry。 */
 function registerAllTools() {
+  registerTool({
+    id: 'read_skill_guide', name: '读取技能速查文档', category: 'query', icon: '📖',
+    description: '按系统提示的技能索引读取速查文档。使用技能前先读；同次运行可复用。只接受已加载且当前启用的 skillId，不能读取任意文件。',
+    parameters: { type: 'object', properties: { skillId: { type: 'string', description: '技能索引中的 skillId' } }, required: ['skillId'], additionalProperties: false },
+    execute: (ctx, args) => {
+      try { return ok(readSkillGuide(skillManager, ctx, args.skillId)); }
+      catch (error) { return err(error.message); }
+    }
+  });
   // 消息发送类
   registerTool({
     id: 'send_message',
@@ -1266,6 +1276,7 @@ export async function executeTool(defs, ctx, name, argsJson) {
     return { content: `错误：工具 ${name} 的参数不是合法 JSON：${String(raw).slice(0, 200)}`, isError: true };
   }
   try {
+    if (def.skillId) requireSkillGuide(skillManager, ctx, def.skillId);
     return await def.execute(ctx, args ?? {});
   } catch (error) {
     return { content: `错误：${error?.message ?? error}`, isError: true };

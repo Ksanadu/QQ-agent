@@ -17,6 +17,7 @@ import { SkillRegistry } from './registry.js';
 import { CapabilityRegistry } from './capabilities.js';
 import { SKILL_ERROR, SkillError, skillErrorText } from './errors.js';
 import { isSkillEnabledInConfig, getSkillConfig } from './config.js';
+import { guideLocation } from './guides.js';
 
 /** hook 默认超时：单个 Skill 卡死不能拖垮整轮对话。 */
 const DEFAULT_HOOK_TIMEOUT_MS = 5000;
@@ -437,8 +438,17 @@ export class SkillManager {
     for (const skill of this.registry.list()) {
       const st = this.isActive(skill.manifest.id, context);
       if (!st.active) continue;
-      const sections = skill.manifest.prompt?.sections || [];
+      const guide = skill.manifest.prompt?.guide;
+      const sections = guide ? [] : (skill.manifest.prompt?.sections || []);
       for (const s of sections) out.push({ ...s, skillId: skill.manifest.id });
+      if (guide) out.push({
+        id: `${skill.manifest.id}-quick-reference`,
+        title: skill.manifest.name,
+        content: `何时读：${guide.when}；位置：${guideLocation(skill)}；skillId=${skill.manifest.id}`,
+        priority: guide.priority,
+        skillId: skill.manifest.id,
+        isGuideIndex: true
+      });
       // 动态片段：Skill 可选实现 promptSections(context)
       if (typeof skill.promptSections === 'function') {
         try {

@@ -21,6 +21,7 @@
 //   prompt              提示词片段声明（见 promptSections）
 //   deprecated          标记为过期的 Skill（仍可加载，UI 提示）
 
+import { GUIDE_FILE } from './guides.js';
 export const SKILL_API_VERSION = 1;
 
 /**
@@ -128,11 +129,15 @@ function normalizePrompt(prompt) {
       priority: Math.min(99, Number(s?.priority) || 50)
     }))
     .filter((s) => s.content);
-  if (!normalized.length && !prompt.instruction) return null;
+  const when = typeof prompt.guide?.when === 'string' ? prompt.guide.when.trim() : '';
+  const guide = prompt.guide?.file === GUIDE_FILE && when
+    ? { file: GUIDE_FILE, when: when.slice(0, 200), priority: Math.min(99, Number(prompt.guide.priority) || 50) }
+    : null;
+  if (!normalized.length && !prompt.instruction && !guide) return null;
   if (!normalized.length && prompt.instruction) {
     normalized.push({ id: 'main', title: '', content: String(prompt.instruction).trim(), priority: 50 });
   }
-  return { sections: normalized };
+  return { sections: normalized, ...(guide ? { guide } : {}) };
 }
 
 /** 判断 manifest 是否可用（没有致命问题）。 */
