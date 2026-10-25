@@ -164,10 +164,15 @@ function loadPluginTools() {
 function registerAllTools() {
   registerTool({
     id: 'read_skill_guide', name: '读取技能速查文档', category: 'query', icon: '📖',
-    description: '按系统提示的技能索引读取速查文档。使用技能前先读；同次运行可复用。只接受已加载且当前启用的 skillId，不能读取任意文件。',
+    description: '按索引读取核心或技能速查文档，使用前先读，同次运行可复用。仅允许列出的核心 ID 或当前启用技能 ID，不接受文件路径。',
     parameters: { type: 'object', properties: { skillId: { type: 'string', description: '技能索引中的 skillId' } }, required: ['skillId'], additionalProperties: false },
     execute: (ctx, args) => {
-      try { return ok(readSkillGuide(skillManager, ctx, args.skillId)); }
+      try {
+        const guide=readSkillGuide(skillManager, ctx, args.skillId);
+        if(args.skillId==='core-stickers') guide.runtime={stickerEncourage:getConfig().sticker?.encourage??0};
+        if(args.skillId==='core-media'||args.skillId==='core-web') guide.runtime={visionEnabled:ctx.skillContext?.visionEnabled??(getConfig().api?.vision!==false),searchEnabled:ctx.skillContext?.searchEnabled??(getConfig().webSearch?.enabled!==false)};
+        return ok(guide);
+      }
       catch (error) { return err(error.message); }
     }
   });

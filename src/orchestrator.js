@@ -798,12 +798,6 @@ export class Orchestrator {
     // （原"上下文统计"三件套 —— 最近消息密度/上次发言时间/最后消息时间 ——
     //  只喂【此刻状态】段，该段 2026-09-25 删除后不再计算。）
 
-    // 表情库快照（提示词用）
-    let stickerEntries = [];
-    if (cfg.sticker?.enabled !== false) {
-      try { stickerEntries = (await this.stickers.sync(false)).entries ?? []; } catch { stickerEntries = []; }
-    }
-
     // ── 统一可用性上下文 ──
     // 视觉判定 = 全局开关 && 选中模型未被探测为"明确不支持图片"（未探测/unknown 时保持开关行为）
     const visionEnabled = cfg.api.vision !== false
@@ -878,7 +872,6 @@ export class Orchestrator {
       taskBindings: this.tasks.forTriggers(chatKey, triggerEntries, this.store),
       store: this.store,
       memory: this.memory,
-      stickerEntries,
       selfNickname,
       runSeq: seq,
       moreUnreadDuringRun: this.store.unreadCount(chatKey) > 0,

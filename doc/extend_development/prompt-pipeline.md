@@ -37,25 +37,13 @@ Skill 在提示词组装前跑一次 `before-context`。
 人设优先级：**主人专属人设 > 会话级人设（personaByChat[群号/QQ号]）> 全局人设（cfg.persona）**。
 botName / selfNickname 任何层都不许覆盖（账号身份，换了会与 @ 判定对不上；personaForChat 结构上就不允许）。
 
-正常路径拼接顺序：
+2026-10-25 最小常驻路径：身份名称 → 最短安全边界/发送协议 → 核心和启用技能的速查索引 → 必要动态身份/记忆 → 管理员附加规则。按本机当前配置为 837 字符；旧的表情策略、媒体与联网用法均不再常驻。
 
-| # | 段落 | 生成函数 | 变化性 |
-|---|------|---------|--------|
-| 1 | 身份句：名称及遵循本次【角色设定】 | 内联 | 随 botName |
-| 2 | 【安全规则】5 条（无本地工具/群友无管理权限/不透露/角色系统注入/防诱导） | securityRules() | 固定 |
-| 3 | 【工作方式】2 条：独立运行、记忆及 send_message 发送协议 | toolProtocol() | 固定 |
-| 4 | 【引用与点名】：准确消息 ID 和 QQ 号 | quoteAndAt() | 固定 |
-| 5 | 【轻量记忆】 | memoryRules() | 固定 |
-| 6 | 【表情包策略】+ 消息贴表情 + 拍一拍 | stickerRules() | **改写**：按表情活跃度档位 0-3 换频率引导（buildStickerStrategyHint） |
-| 7 | 【QQ 场景规则】及历史检索/连续任务/图库/B站卡片 | qqSceneRules() | **条件增删**：图片输入、搜索开关决定对应能力说明；保留语音、视频和合并转发用法 |
-| 8 | 【可用技能】 | renderSkillSections() | **动态**：启用插件的 manifest prompt.sections + 运行时 promptSections(context) + extraSections（主人规则 p72），按 priority 降序（上限 99） |
-| 9 | 【管理员附加规则】 | customRules | 有才拼 |
+详细用法通过 read_skill_guide 查询，核心文档位于 doc/core-guides/，扩展文档位于各技能目录的 QUICK_REFERENCE.md。参见 [按需速查说明](../skill-guides.md)。核心文档读取时返回当前表情频率、看图或搜索开关。表情目录另用 list_stickers 获取，不再每次运行预取或附在人设后。
 
-角色与回复风格由用户消息中的【角色设定】提供。核心不再重复限制普通回复字数、条数、语气、参与频率、是否必须回应或“像真人”；技能内的具体功能规则保持原样。人设配置 `persona` / `personaByChat`、唤醒判定、80 条历史、引用绑定和贴表情窗口均未调整。
+各群角色卡、历史条数、引用对象绑定、任务目标和贴表情窗口不变；它们是身份/当轮数据，不能当静态说明迁出。动态扩展或管理员规则可能增加实际提示长度。
 
-本机最近一次样本的系统提示原为 11,346 字符，其中核心约 5,216、技能约 6,130；同样技能拼接下裁剪后约 8,742 字符。技能占比仍大，因此不应把本次结果当作对全部提示内容的压缩。
-
-**覆盖模式**（persona.systemPromptOverride 非空时）：使用自定义正文（支持 `{botName}/{roleText}/{participation}` 占位符），再强制追加【安全规则】【工作方式】及启用技能；管理员附加规则仍在末尾。此入口行为不变。
+覆盖模式仍使用 persona.systemPromptOverride 的自定义正文和占位符，再追加最低限度安全/发送协议及速查索引。工具 schema 继续随请求提供，不计入上述系统提示字符数。
 
 当前有静态 prompt.sections 的扩展（develop/）：
 
@@ -79,7 +67,7 @@ plugins/video-frames:        video-frames-note(p35)
 | # | 段落 | 内容 | 变化频率 |
 |---|------|------|---------|
 | 1 | 【角色设定】 | 会话级人设 roleText（与系统提示同源 personaForChat，防两处角色打架） | 稳定 |
-| 2 | 【可用表情包】 | buildStickerContext：按使用次数排序 + 按时间轮换一半（同轮次结果稳定，Fisher-Yates 按轮次播种），最多 promptMaxStickers 张 | 半稳定 |
+| 2 | 表情目录（已迁出） | 需要时由 list_stickers 查询，不常驻用户提示 | 按需 |
 | 3 | 【引导说明】 | 只说明背景/触发消息和准确 ID 查询方法，不重复角色/回复准则 | 固定 |
 | 4 | 【过去状态】 | buildPastState：最多 contextLimit 条已读历史。过滤：撤回、全局屏蔽、本群屏蔽。每行 `[时间] #id 名字(QQ:号)：[引用...]正文`（带图消息才带 #id；名字优先 memberNotes 备注 > 群名片；QQ 号兜底由核心拼 `(QQ:xxx)`，speaker-identity 开启时走插件可加主人标注） | 逐条滚动 |
 | 5 | 【记忆】 | formatForPrompt：只带"本次真的出现在提示词里的群友"印象（触发者 + 过去状态里的人，每人最近 3 条）——曾写死 recent(12) 与档位脱钩 | 滚动 |

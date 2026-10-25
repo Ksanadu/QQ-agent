@@ -61,7 +61,7 @@ function makeStore() {
 
 // ── 1. 系统提示包含全部行为模块，且不包含已移除的沉睡/唤醒机制 ──
 const sys = buildSystemPrompt();
-for (const keyword of ['安全规则', '工作方式', '引用与点名', '记忆', '表情包策略', 'QQ 场景规则', '消息贴表情']) {
+for (const keyword of ['安全规则', '工作方式', 'read_skill_guide', 'core-stickers', 'core-context', 'core-media', 'core-web']) {
   assert.ok(sys.includes(keyword), `系统提示缺少模块：${keyword}`);
 }
 for (const banned of ['沉睡前观察', 'qq_wait_for_messages', 'qq_set_wake_config', 'qq_mark_read', '[SILENT]', '会话令牌']) {
@@ -98,9 +98,11 @@ const userPrompt = buildUserPrompt({
   proactive: false
 });
 
-for (const section of ['【当前时间】', '【角色设定', '【已读信息】', '【未读信息】', '【记忆】', '【可用表情包】', '【引导说明】']) {
+for (const section of ['【当前时间】', '【角色设定', '【已读信息】', '【未读信息】', '【记忆】', '【引导说明】']) {
   assert.ok(userPrompt.includes(section), `用户提示缺少段落：${section}`);
 }
+assert.ok(!userPrompt.includes('【可用表情包】'), '表情目录应按需查询，不常驻上下文');
+assert.ok(!sys.includes('【表情包策略'), '表情用法已移入核心速查');
 for (const banned of ['沉睡前观察', 'qq_', '[SILENT]', '【此刻状态】', '【过去状态】', '【本次唤醒】']) {
   assert.ok(!userPrompt.includes(banned), `用户提示不应包含（已删除/改名段落）：${banned}`);
 }

@@ -29,5 +29,27 @@ try{
  assert.ok(req[1].messages.some(x=>x.role==='tool'&&String(x.content).includes('请先调用 read_skill_guide')));
  assert.ok(req[2].messages.some(x=>x.role==='tool'&&String(x.content).includes(marker)));
  assert.ok(req[3].messages.some(x=>x.role==='tool'&&String(x.content).includes('实际资料:123')));
+ const start=req.length;
+ const imageDir=path.join(process.env.QQ_AGENT_DATA_DIR,'sticker-images');fs.mkdirSync(imageDir,{recursive:true});
+ const imageFile=path.join(imageDir,'on-demand.png');fs.writeFileSync(imageFile,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9uoAAAAASUVORK5CYII=','base64'));
+ const sticker={id:'ONLY_STICKER_TEST_ID',desc:'按需查出的表情',url:'file:///'+imageFile.replaceAll('\\','/')};
+ env.app.stickers.sync=async()=>({entries:[sticker]});
+ env.app.stickers.list=async()=>[sticker];
+ env.app.stickers.find=async id=>id===sticker.id?sticker:null;
+ env.app.stickers.ensureSendable=async s=>s;
+ env.llm.state.script.push(
+  {toolCalls:[{name:'read_skill_guide',args:{skillId:'core-stickers'}}]},
+  {toolCalls:[{name:'list_stickers',args:{query:'可爱'}}]},
+  {toolCalls:[{name:'send_sticker',args:{stickerId:sticker.id}}]}
+ );
+ env.pushGroupMsg(777,'甲','@测试机 发个可爱表情',1002);
+ await waitFor(()=>env.onebotHttp.state.sends.some(s=>s.body.message.some(m=>m.type==='image')),8000);
+ await waitFor(()=>env.app.orchestrator.runningChats.size===0,3000);
+ const input=env.llm.state.requests[start].messages;
+ assert.ok(!input.some(m=>String(m.content).includes('ONLY_STICKER_TEST_ID')),'未查询前不自动附带表情目录');
+ assert.ok(!input.some(m=>String(m.content).includes('【可用表情包】')));
+ assert.ok(env.llm.state.requests[start+1].messages.some(m=>m.role==='tool'&&String(m.content).includes('runtime')));
+ assert.ok(env.llm.state.requests[start+2].messages.some(m=>m.role==='tool'&&String(m.content).includes(sticker.id)));
  console.log('PASS real ingest → short skill index → blocked unread call → read guide tool → skill execution → queued QQ reply; full guide absent from initial system prompt');
+ console.log('PASS core sticker guide → on-demand catalogue → real queued sticker send; no automatic catalogue injection');
 }finally{skillManager.unregister('guide-demo');await env.teardown();fs.rmSync(dir,{recursive:true,force:true});}

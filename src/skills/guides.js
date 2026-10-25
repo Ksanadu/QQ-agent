@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { getCoreGuide } from '../core-guides.js';
 
 export const GUIDE_FILE = 'QUICK_REFERENCE.md';
 const MAX_GUIDE_BYTES = 64 * 1024;
@@ -8,6 +9,7 @@ const MAX_GUIDE_BYTES = 64 * 1024;
 const readByContext = new WeakMap();
 
 export function guideLocation(skill) {
+  if(skill.coreGuide) return `doc/core-guides/${skill.guideFile}`;
   const relative = String(skill.relDir || '').replaceAll('\\', '/');
   const dir = /^(skills|plugins)\/[a-zA-Z0-9_-]+$/.test(relative)
     ? relative : `${skill.kind === 'plugin' ? 'plugins' : 'skills'}/${skill.manifest.id}`;
@@ -16,16 +18,17 @@ export function guideLocation(skill) {
 
 function loadGuide(manager, id, context) {
   if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(id)) throw new Error('技能 ID 无效');
-  const skill = manager.registry.get(id);
-  if (!skill || !manager.isActive(id, context.skillContext || context).active) throw new Error('技能未加载、已关闭或当前不可用');
+  const skill = getCoreGuide(id) || manager.registry.get(id);
+  if (!skill || (!skill.coreGuide && !manager.isActive(id, context.skillContext || context).active)) throw new Error('技能未加载、已关闭或当前不可用');
   const guide = skill.manifest.prompt?.guide;
-  if (!guide || guide.file !== GUIDE_FILE || !skill.dir) throw new Error('该技能未提供速查文档');
+  const filename=skill.coreGuide?skill.guideFile:GUIDE_FILE;
+  if (!guide || guide.file !== filename || !skill.dir) throw new Error('该技能未提供速查文档');
   let dir, file, fd;
   try {
     dir = fs.realpathSync(skill.dir);
-    file = fs.realpathSync(path.join(dir, GUIDE_FILE));
+    file = fs.realpathSync(path.join(dir, filename));
     const relative = path.relative(dir, file);
-    if (relative !== GUIDE_FILE) throw new Error('速查文档不在技能目录内');
+    if (relative !== filename) throw new Error('速查文档不在技能目录内');
     fd = fs.openSync(file, 'r');
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.size === 0 || stat.size > MAX_GUIDE_BYTES) throw new Error('速查文档为空或超过 64 KiB');

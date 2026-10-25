@@ -1131,19 +1131,16 @@ refs:
       assert.equal(bad, 0, `倒序后不应有时间倒挂，实际 ${bad} 处`);
     }
 
-    // 表情包频率：档位改写系统提示【表情包策略】的频率行（2026-09-07 从用户消息搬入系统提示）
+    // 表情包策略按需读取，实时频率随速查工具返回，不再每轮注入。
     const base = getConfig();
-    const expect = [
-      [0, '表情包是备选项'],
-      [1, '每 3~5 轮来一张'],
-      [2, '回应、吐槽、接梗时优先考虑'],
-      [3, '表情包爱好者']
-    ];
-    for (const [lvl, kw] of expect) {
+    const { buildToolDefs: guideTools } = await import('../src/tools.js');
+    const guideReader = guideTools().find(d => d.id === 'read_skill_guide');
+    for (const lvl of [0,1,2,3]) {
       setRuntimeConfig({ ...base, sticker: { ...base.sticker, enabled: true, encourage: lvl } });
       const sys = buildSystemPrompt({ persona: { botName: 'bot', participation: 'medium' } });
-      assert.ok(sys.includes('【表情包策略'), `${lvl} 档：系统提示应包含表情包策略段`);
-      assert.ok(sys.includes(kw), `${lvl} 档频率行应包含「${kw}」，实际未命中`);
+      assert.ok(!sys.includes('【表情包策略'), '表情策略已迁出常驻提示');
+      const result = await guideReader.execute({}, { skillId: 'core-stickers' });
+      assert.equal(JSON.parse(result.content).runtime.stickerEncourage, lvl);
     }
     setRuntimeConfig(base);
     pass('群名 / 存档倒序 / 表情包频率档位');

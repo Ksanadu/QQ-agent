@@ -26,6 +26,17 @@ try{
  assert.ok(!sections.some(s=>s.content.includes('唯一用法标记')));
  assert.ok(!sections.some(s=>s.content.includes('不应重复注入的旧说明')));
  const ctx={chatKey:'group:1'},other={chatKey:'group:2'},nextRun={chatKey:'group:1'};
+ assert.equal(manager.register({manifest:{id:'core-stickers'}}).ok,false);
+ assert.match(readSkillGuide(manager,ctx,'core-stickers').content,/list_stickers/);
+ assert.match(readSkillGuide(manager,ctx,'core-context').content,/set_task_context/);
+ assert.throws(()=>readSkillGuide(manager,ctx,'core-unknown'));
+ const {buildToolDefs}=await import('../src/tools.js');
+ const reader=buildToolDefs().find(t=>t.id==='read_skill_guide');
+ for(const level of [0,1,2,3]){
+  cfg.sticker.encourage=level;setRuntimeConfig(cfg);
+  const result=await reader.execute(ctx,{skillId:'core-stickers'});
+  assert.equal(JSON.parse(result.content).runtime.stickerEncourage,level);
+ }
  assert.throws(()=>requireSkillGuide(manager,ctx,'guide-demo'),/read_skill_guide/);
  assert.match(readSkillGuide(manager,ctx,'guide-demo').content,/唯一用法标记/);
  requireSkillGuide(manager,ctx,'guide-demo');

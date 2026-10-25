@@ -40,8 +40,10 @@ const prompt = buildUserPrompt({ ...context, kind: 'group', chatId: '456', chatN
 const block = prompt.split('【本轮可贴表情的消息】固定窗口＝')[1].split('\n\n【')[0];
 assert.match(block, new RegExp(`#${history[11].mid}（之前10条）.*佬虎.*257214159`));
 assert.ok(!block.includes(`#${history[1].mid}（`));
-assert.match(buildSystemPrompt(), /绝不能改贴到发指令的人头上/);
-assert.match(buildSystemPrompt(), /指定表情不受支持时也应说明/);
+assert.match(buildSystemPrompt(), /core-stickers/);
+const stickerGuide = fs.readFileSync(new URL('../doc/core-guides/core-stickers.md', import.meta.url), 'utf8');
+assert.match(stickerGuide, /不能换成请求者/);
+assert.match(stickerGuide, /指定表情不受支持时也应说明/);
 console.log('✓ model sees historical target ID + sender identity; instructions forbid substituting requester or emoji');
 
 const calls = [];

@@ -18,6 +18,7 @@ import { CapabilityRegistry } from './capabilities.js';
 import { SKILL_ERROR, SkillError, skillErrorText } from './errors.js';
 import { isSkillEnabledInConfig, getSkillConfig } from './config.js';
 import { guideLocation } from './guides.js';
+import { getCoreGuide } from '../core-guides.js';
 
 /** hook 默认超时：单个 Skill 卡死不能拖垮整轮对话。 */
 const DEFAULT_HOOK_TIMEOUT_MS = 5000;
@@ -69,6 +70,7 @@ export class SkillManager {
   register(skill) {
     const id = skill?.manifest?.id;
     if (!id) return { ok: false, id: '', error: '缺少 manifest.id' };
+    if (getCoreGuide(id)) return { ok: false, id, error: '该技能 ID 是核心速查保留标识' };
 
     // 覆盖注册（热重载）时必须走完整生命周期：**先 deactivate 再 dispose**。
     // 历史上这里只调 dispose（只回收工具），不调 deactivate ——
@@ -447,6 +449,9 @@ export class SkillManager {
         content: `何时读：${guide.when}；位置：${guideLocation(skill)}；skillId=${skill.manifest.id}`,
         priority: guide.priority,
         skillId: skill.manifest.id,
+        guideId: skill.manifest.id,
+        when: guide.when,
+        location: guideLocation(skill),
         isGuideIndex: true
       });
       // 动态片段：Skill 可选实现 promptSections(context)
