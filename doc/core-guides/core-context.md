@@ -11,4 +11,3 @@
 memory_append 只写长期稳定印象，过时用 memory_remove；不要记临时闲聊。跨群记忆需另读 cross-group-memory 的速查文档，区分永久印象与衰减事实，不存敏感个人信息。
 
 跨会话发送只在有明确目标和理由时使用 send_to，先 get_chats 查真实 chatKey。开关、白名单和其他权限由宿主执行，未成功不能声称已送达。提醒等辅助工具也以 schema 和实际回执为准。
-

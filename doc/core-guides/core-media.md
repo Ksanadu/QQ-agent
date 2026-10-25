@@ -9,4 +9,3 @@
 - [语音转文字] 是 QQ 原生识别结果；[语音] 可用 transcribe_voice_message 重试。未识别时不能猜测。发语音/朗读另读 tts-say 速查，不与收到语音的识别混淆。
 - [视频] 用 read_video；[文件] 是占位符。合并转发用 read_forward 和转发消息自己的 ID 展开，负数 ID 有效；先尝试工具，不直接说看不了。
 - 生图另读 antigravity-image 或 comfy-draw。必须用户本人发对应 /generate 或 /comfy；队列、额度、先受理再返图由程序执行，不能自行换后端或代发命令。
-
