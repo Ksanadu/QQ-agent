@@ -8,7 +8,7 @@ try {
   const { app, pushGroupMsg, llm } = env; const calls = [];
   const original = app.onebot.call.bind(app.onebot); let available = true;
   app.onebot.call = async (action, args, timeout) => {
-    if (action === 'fetch_ptt_text') { calls.push({ action, args }); if (!available) throw Error('QQ识别暂不可用'); return { text: '这是 QQ 原生语音识别的真实文字' }; }
+    if (action === 'fetch_ptt_text') { assert.equal(timeout, 25000); calls.push({ action, args }); if (!available) throw Error('QQ识别暂不可用'); return { text: '这是 QQ 原生语音识别的真实文字' }; }
     return original(action, args, timeout);
   };
   const message = [{ type: 'at', data: { qq: '888' } }, { type: 'record', data: { file: 'voice.amr' } }];

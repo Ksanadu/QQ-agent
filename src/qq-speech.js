@@ -9,7 +9,9 @@ export async function transcribeQQVoice(onebot, messageId) {
   const old = cache.get(id);
   if (old && old.until > Date.now()) return old.promise;
   const promise = (async () => {
-    const result = await onebot.call('fetch_ptt_text', { message_id: Number(id) }, 20000);
+    // SnowLuma itself waits 20 s for QQ's result push. Leave transport headroom
+    // so its actual error reaches the caller instead of racing an HTTP abort.
+    const result = await onebot.call('fetch_ptt_text', { message_id: Number(id) }, 25000);
     const text = String(result?.text ?? '').trim();
     if (!text) throw new Error('QQ 未返回语音识别文本');
     return text.slice(0, 12000);

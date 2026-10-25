@@ -15,6 +15,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { patchSnowlumaPtt } from '../src/snowluma-ptt-patch.js';
 // 共用下载器（流式 + 进度条 + 增量哈希 + 原子改名），setup-napcat 用的是同一份
 import { download as downloadFile, fileSha256 } from './lib/download.mjs';
 import {
@@ -911,6 +912,9 @@ async function main() {
   await installSnowluma();
   // 1.5 让协议栈声明的版本与实际运行的 QQ 一致（见 alignClientBuild 注释）
   alignClientBuild();
+  const pttPatch = patchSnowlumaPtt(SNOWLUMA_DIR);
+  if (pttPatch.status === 'unsupported') warn('SnowLuma 语音兼容补丁未应用：未知代码版本，需检查原生识别是否正常');
+  else log(`SnowLuma 语音消息 ID 兼容检查：${pttPatch.status}`);
 
   // 2. 便携 QQ（可选跳过）
   if (!SKIP_QQ) {

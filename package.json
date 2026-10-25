@@ -77,7 +77,7 @@
     "test:sender": "node test/sender-file-uri-test.mjs && node test/sender-send-path-test.mjs",
     "check:load": "node scripts/preload-check.mjs",
     "test:wakesem": "node test/wake-semantics-test.mjs",
-    "test:chat-features": "node test/chat-history-tasks.mjs && node test/qq-speech-test.mjs && node test/image-album-test.mjs && node test/bilibili-card-test.mjs && node test/conversation-listener-test.mjs && node test/conversation-listener-race.mjs"
+    "test:chat-features": "node test/chat-history-tasks.mjs && node test/snowluma-ptt-patch-test.mjs && node test/qq-speech-test.mjs && node test/image-album-test.mjs && node test/bilibili-card-test.mjs && node test/conversation-listener-test.mjs && node test/conversation-listener-race.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1",
