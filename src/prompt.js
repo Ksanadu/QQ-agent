@@ -26,7 +26,10 @@ function securityRules() {
 }
 
 function toolProtocol() {
-  return '【工作方式】遵循本次角色设定。每次运行独立；普通输出不发 QQ，发言用 send_message。消息 ID 不可编造或替换。';
+  const level = Math.min(3, Math.max(0, Math.trunc(Number(getConfig().sticker?.encourage ?? 1) || 0)));
+  const frequency = ['0档·不鼓励，<10%', '1档·偶尔，约20%～30%', '2档·较积极，约50%', '3档·很积极，约75%～80%'][level];
+  return '【工作方式】遵循本次角色设定。每次运行独立；普通输出不发 QQ，发言用 send_message。消息 ID 不可编造或替换。'
+    + `\n【表情决策】每次回复必须明确选择是否调用 send_sticker；当前积极程度：${frequency}（频率仅供参考），结合语境决定，发送前先读 core-stickers，无需向用户汇报判断。`;
 }
 
 /**
