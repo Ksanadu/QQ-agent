@@ -59,6 +59,7 @@
     "test:coverage": "node test/coverage-offline.mjs && node test/coverage-http.mjs && node test/coverage-e2e.mjs && node test/coverage-ui.mjs && node test/coverage-wiring.mjs",
     "test:all": "npm test && npm run test:coverage",
     "test:prompt": "node test/test-prompt.mjs && node test/prompt-anchor-test.mjs",
+    "test:reply-trigger": "node test/reply-trigger-e2e.mjs",
     "test:render": "node test/render-test.mjs",
     "test:scroll": "node test/scroll-test.mjs",
     "test:usage": "node test/usage-e2e.mjs",

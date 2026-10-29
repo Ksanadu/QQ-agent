@@ -49,9 +49,9 @@ function showUploadToast(title, url, { onClose } = {}) {
 /** 档位说明（concept2 设计稿文案：带 <b> 强调，百分比与后端判定同源）。 */
 function descOf(pos) {
   const { tier, randomPercent } = sliderToTierUI(pos);
-  if (tier === 1) return '只有被 @ 时才响应，其余消息标记已读、<b>不调模型</b>（最省 token）';
+  if (tier === 1) return '被 @、准确引用机器人消息或拍一拍时响应';
   if (tier === 2) return '在 1 档基础上，<b>命中关键词</b>也响应';
-  if (tier === 3) return `被 @ / 命中关键词必响应；此外每批普通消息有 <b>${randomPercent}%</b> 概率响应`;
+  if (tier === 3) return `直接召唤（@、准确引用机器人或拍一拍）/ 命中关键词必响应；此外每批普通消息有 <b>${randomPercent}%</b> 概率响应`;
   return '任何消息都响应 —— <b>最费 token</b>';
 }
 

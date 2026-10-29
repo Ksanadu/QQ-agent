@@ -255,12 +255,12 @@ export function stripMentions(entry) {
  * 2026-09-25 改版：四个档位读取的已读历史条数统一（store.historyCount，
  * 见 config.js），档位退化为纯粹的"触发方式开关"：
  *
- *   1 档 仅艾特    → 只有被艾特（或拍一拍我）才响应
+ *   1 档 直接召唤  → 被艾特、准确引用机器人消息或拍一拍我时响应
  *   2 档 +关键词   → 命中关键词也响应
  *   3 档 +随机     → randomPercent% 概率响应
  *   4 档 全响应    → 任何消息都响应（兜底）
  *
- *   触发原因优先级（高→低）：被艾特 > 关键词 > 随机 > 全部响应。
+ *   1~3 档触发原因优先级（高→低）：被艾特 > 引用机器人消息 > 关键词 > 随机。
  *   reason 记录实际触发原因（供会话页解释"为什么响应了"）。
  *
  * ── 没命中会怎样 ──
@@ -328,6 +328,17 @@ export function resolveContextTier({ triggerEntries = [], selfNickname = '', bot
   // 1~3 档：先看最明确的召唤信号
   if (atMe) {
     return { tier: 1, count: historyCount(), reason: '被艾特', shouldRespond: true };
+  }
+  // 只信任按真实 QQ 消息 ID 解析的引用快照，不能根据昵称或引用文本猜身份。
+  const replyToMe = (triggerEntries || []).some((e) => {
+    const reply = e?.reply;
+    const mid = String(reply?.messageId ?? '');
+    return reply?.resolved === true && reply.self === true
+      && /^-?[1-9]\d*$/.test(mid) && Number.isSafeInteger(Number(mid))
+      && String(selfId || '') !== '' && String(reply.senderId) === String(selfId);
+  });
+  if (replyToMe) {
+    return { tier: 1, count: historyCount(), reason: '引用机器人消息', shouldRespond: true };
   }
   if (tier >= 2 && keyword) {
     return { tier: 2, count: historyCount(), reason: '关键词命中', shouldRespond: true };

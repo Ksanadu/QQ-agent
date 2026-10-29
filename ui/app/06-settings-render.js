@@ -817,14 +817,14 @@ function sliderToTierUI_tierToSlider(st) {
 /** 滑条位置 → 一句话说明（给用户的即时反馈）。 */
 function sliderDesc(pos) {
   const { tier, randomPercent } = sliderToTierUI(pos);
-  if (tier === 1) return '<b>1 档 · 仅艾特</b>：只有被 @ 时才响应，其余消息标记已读、不调模型（最省）';
-  if (tier === 2) return '<b>2 档 · +关键词</b>：被 @ 或命中关键词时响应';
+  if (tier === 1) return '<b>1 档 · 仅艾特</b>：被 @、准确引用机器人消息或拍一拍时响应';
+  if (tier === 2) return '<b>2 档 · +关键词</b>：直接召唤（@、准确引用机器人或拍一拍）或命中关键词时响应';
   // 3 档概率展示必须与后端判定同源：resolveContextTier 用 Math.random()*100 与
   // randomPercent 比较（即"骰子值 < 阈值"），滑条换算出的 randomPercent 就是这个阈值。
   // 之前这里展示的是 sliderToTier 的 randomPercent 四舍五入值，而后端在保存时会
   // 重新权威换算一次 —— 两边都来自同一公式，但旧版 desc 里取整方式不同导致偶发不一致，
   // 现在统一保留一位小数（与 sliderToTier 一致）。
-  if (tier === 3) return `<b>3 档 · +随机</b>：被 @ / 关键词必响应；此外每批普通消息有 <b>${randomPercent}%</b> 概率响应`;
+  if (tier === 3) return `<b>3 档 · +随机</b>：直接召唤（@、准确引用机器人或拍一拍）/ 关键词必响应；此外每批普通消息有 <b>${randomPercent}%</b> 概率响应`;
   return '<b>4 档 · 全响应</b>：任何消息都响应，且艾特/关键词/随机的判定全部失效';
 }
 
@@ -837,7 +837,7 @@ function sliderDescText(pos) {
   return `${tier} 档 · ${TIER_NAME[tier]}`;
 }
 const TIER_HINT = {
-  1: '只有被 @ 时才响应，其余消息标记已读、不调模型（最省 token）',
+  1: '被 @、准确引用机器人消息或拍一拍时响应',
   2: '在 1 档基础上，命中关键词也响应',
   3: '在 2 档基础上，再按概率随机响应一些消息',
   4: '任何消息都响应（改造前的行为，最费 token）'
