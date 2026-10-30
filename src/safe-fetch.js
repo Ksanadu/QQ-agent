@@ -269,7 +269,10 @@ function requestOnce(url, ip, { asBinary = false, maxBytes = 50000 } = {}) {  re
       headers: {
         host: url.host,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) qq-agent/1.0',
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8,image/avif,image/webp,image/*;q=0.8',
+        // 下图时不报 avif：图床（如 fextralife）按 Accept 协商，报了就回 avif，QQ 发不出去也过不了魔数校验
+        accept: asBinary
+          ? 'image/webp,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1'
+          : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8,image/avif,image/webp,image/*;q=0.8',
         'accept-language': 'zh-CN,zh;q=0.9'
       },
       servername: url.protocol === 'https:' ? url.hostname : undefined,

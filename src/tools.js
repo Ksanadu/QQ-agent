@@ -24,6 +24,8 @@ import { readSkillGuide, requireSkillGuide } from './skills/guides.js';
 import { holidayOn, upcomingHoliday } from './holidays.js';
 import { compressImage } from './image-compress.js';
 import { localStickerPath, readLocalStickerImage } from './sticker-manager.js';
+// 魔数识别统一用 image-type.js：本文件原先自带一份，WebP 判断写成 toString(0, 8) === 'RIFF'，永远不成立
+import { detectMime } from './image-type.js';
 import { isGifBuffer, gifToVideoDataUrl, resolveGifRoute } from './gif-to-video.js';
 
 /** 当前配置的 GIF 选路（vision/video 开关组合，规则矩阵见 resolveGifRoute 注释）。 */
@@ -93,15 +95,6 @@ function getImagePartsOrVideo(text, results) {
     parts[0].text += `\n（其中 ${gifAsImage.length} 张是 GIF 动图，按原图发送：部分模型只能看到第一帧，读不了时会自动换成首帧重试）`;
   }
   return { content: parts, videoCount: parts.filter((p) => p.type === 'video_url').length };
-}
-
-function detectMime(buf) {
-  if (!buf || buf.length < 12) return null;
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
-  if (buf.toString('ascii', 0, 6) === 'GIF87a' || buf.toString('ascii', 0, 6) === 'GIF89a') return 'image/gif';
-  if (buf.toString('ascii', 0, 8) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
-  return null;
 }
 
 function ok(payload) {
