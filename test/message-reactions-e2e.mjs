@@ -40,7 +40,7 @@ try {
   const firstRequest = llm.state.requests[0];
   assert.ok(firstRequest.tools.some((t) => t.function.name === 'react_message'));
   const firstPrompt = firstRequest.messages.find((m) => m.role === 'user').content;
-  assert.match(firstPrompt, /【本轮可贴表情的消息】/); assert.match(firstPrompt, /#-101（本轮消息）/);
+  assert.ok(!firstPrompt.includes('【本轮可贴表情的消息】'));
   console.log('✓ real incoming event → queued QQ reaction → successful send_message → completed');
 
   pushGroupMsg(777, '甲', '多种表情加文字测试', 102, { message: [
@@ -52,8 +52,8 @@ try {
   assert.deepEqual(calls.slice(1).map((c) => [c.params.message_id, c.params.emoji_id]), [[-800, '66'], [-800, '99']]);
   assert.equal(onebotHttp.state.sends.length, 2); assert.equal(llm.state.requests.length, 3);
   const secondPrompt = llm.state.requests[2].messages.find((m) => m.role === 'user').content;
-  assert.match(secondPrompt, /#-101（之前10条）/);
-  assert.match(secondPrompt, /#-800（之前10条）.*佬虎.*222/);
+  assert.ok(!secondPrompt.includes('【本轮可贴表情的消息】'));
+  assert.ok(!secondPrompt.includes('（之前10条）'));
   assert.ok(!calls.slice(1).some((c) => c.params.message_id === 102), 'requester message never substituted for named other person');
   console.log('✓ named other person in previous-ten window receives both reactions; requester is not substituted; normal reply also works');
 

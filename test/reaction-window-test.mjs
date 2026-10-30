@@ -37,14 +37,13 @@ const memory = new MemoryStore();
 const prompt = buildUserPrompt({ ...context, kind: 'group', chatId: '456', chatName: '测试群',
   memory, stickerEntries: [], selfNickname: '机器人', runSeq: 1, proactive: false,
   contextLimit: 80, reactionMessages: targets, session: {} });
-const block = prompt.split('【本轮可贴表情的消息】固定窗口＝')[1].split('\n\n【')[0];
-assert.match(block, new RegExp(`#${history[11].mid}（之前10条）.*佬虎.*257214159`));
-assert.ok(!block.includes(`#${history[1].mid}（`));
+assert.ok(!prompt.includes('【本轮可贴表情的消息】'));
+assert.ok(!prompt.includes('（之前10条）'));
 assert.match(buildSystemPrompt(), /core-stickers/);
 const stickerGuide = fs.readFileSync(new URL('../doc/core-guides/core-stickers.md', import.meta.url), 'utf8');
 assert.match(stickerGuide, /不能换成请求者/);
 assert.match(stickerGuide, /指定表情不受支持时也应说明/);
-console.log('✓ model sees historical target ID + sender identity; instructions forbid substituting requester or emoji');
+console.log('✓ reaction target list is absent from the prompt; usage stays in the on-demand guide');
 
 const calls = [];
 const queue = new SendQueue({ store, onebot: { async call(action, params) { calls.push({ action, params }); return {}; } } });

@@ -869,7 +869,6 @@ export class Orchestrator {
     const userPrompt = buildUserPrompt({
       chatKey, kind, chatId, chatName,
       triggerEntries,
-      reactionMessages,
       taskBindings: this.tasks.forTriggers(chatKey, triggerEntries, this.store),
       store: this.store,
       memory: this.memory,
