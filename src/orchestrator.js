@@ -2,7 +2,7 @@
 //
 // 流程（对应需求）：
 //   机器人空闲 → 用户发言 → 防抖聚批(wakeDelayMs) → 新开会话（一次独立的 agent 处理）
-//   → 开始时把所有消息标记为已读（触发批作为【未读信息】）→ agent 用工具发言/决定不发言
+//   → 开始时把所有消息标记为已读（触发批作为【未读信息】）→ agent 通过 send_message 交付文字
 //   → 会话弃置（不留 LLM 历史）→ 发现 JSON 里有未读 → drainDelayMs 后再新开会话 → …
 //   → 直到没有未读 → 回到空闲。
 //
@@ -24,6 +24,7 @@ import { rescueUnsentReply } from './reply-rescue.js';
 import { captureReactionTargets } from './message-reactions.js';
 import { ConversationTasks } from './conversation-tasks.js';
 import { ImageAlbum } from './image-album.js';
+import { beginReplyCompletion, hasSendMessageDelivery, DELIVERY_REQUIRED } from './reply-completion.js';
 
 export class Orchestrator {
   constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null, approvals = null }) {
@@ -912,7 +913,7 @@ export class Orchestrator {
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: proactive
-        ? `${userPrompt}\n\n【未读信息】（主动机会）群里已经安静了一会儿。你可以主动抛一个自然的话题（像随口说的，不要像播报），也可以判断没必要说话就安静结束。`
+        ? `${userPrompt}\n\n【未读信息】（主动机会）群里已经安静了一会儿。请用 send_message 自然开启话题，不要像播报。`
         : userPrompt }
     ];
 
@@ -973,8 +974,12 @@ export class Orchestrator {
       emit: (type, payload) => this.emit(type, payload)
     };
 
+    beginReplyCompletion(ctx);
+    const deliveryTools = toolDefs.filter(d => d.id === 'send_message');
+    if (!deliveryTools.length) throw new Error('任务未完成：send_message 已禁用，无法交付当前聊天的文字回复');
     const maxRounds = Math.max(1, Number(cfg.api.maxRounds) || 12);
     let finish = false;
+    let forceDeliveryOnly = false;
     let webSearchCount = 0;
     session.activity = '';
     session.webSearchCount = 0;
@@ -983,7 +988,10 @@ export class Orchestrator {
       this.sessions.update(session.id);
       this.emit('session-update', session.id);
     };
-    for (let round = 0; round < maxRounds && !finish; round++) {
+    // One final, bounded send_message-only opportunity after the normal budget.
+    for (let round = 0; round <= maxRounds && !finish; round++) {
+      const deliveryRound = forceDeliveryOnly || round === maxRounds;
+      if (deliveryRound && hasSendMessageDelivery(ctx)) break;
       // 会话级中止（会话页「中止」按钮）：与全局 abort 同一条收尾路径。
       // 两个入口都会到这里：abortController 中断了在途请求（异常上抛后被
       // wake 的会话级重试判为不可重试 → #runAgent 正常返回 → 无需再拦），
@@ -1033,22 +1041,23 @@ export class Orchestrator {
       }
       markActivity('正在思考…');
       // ── 剩余轮次提醒：防止"工具轮次耗尽导致想说的话发不出去"──
-      // 进入最后 3 轮且还一条消息都没发时，往对话里注入一条系统提醒，
-      // 明确告诉模型"轮次快用完了，现在就该用 send_message 把话说出来"。
-      // 没有这个提醒时，模型常把轮次花在搜索/看图上，循环一断消息就丢了。
-      // 已发出过消息则不打扰（模型可能只是收尾查询，别催它重复发言）。
+      // 完成依据是 send_message 的成功回执，不能被表情等其他动作抵消。
+      // 最后交付轮只催交付；资料不足也应如实回复，而不是编造答案。
       const roundsLeft = maxRounds - round;
-      if (roundsLeft <= 3 && roundsLeft > 0 && session.sent.length === 0
+      if (!hasSendMessageDelivery(ctx) && (deliveryRound || roundsLeft <= 3)
           && messages[messages.length - 1]?.role !== 'system') {
+        if (deliveryRound) ctx.session.completion.recoveryUsed = true;
         messages.push({
           role: 'user',
-          content: `【系统提醒】工具调用轮次只剩 ${roundsLeft} 轮。如果你打算回应本次消息，请立刻调用 send_message 把要说的话发出去，不要再调用其它工具 —— 轮次耗尽后你将没有机会发言，群友会收不到任何内容。`
+          content: deliveryRound
+            ? `【最后交付轮】${DELIVERY_REQUIRED} 本轮仅允许 send_message，不再查询或执行其他动作。`
+            : `【交付提醒】正常处理还剩 ${roundsLeft} 轮。${DELIVERY_REQUIRED}`
         });
       }
       // 网络抖动/5xx/429 会自动重试（同一轮请求，messages 不变，幂等不重复发言）。
       // abortSignal：会话级中止时在途请求立即断开 —— isRetryableError 把
       // "中止"判为不可重试，chatCompletionWithRetry 不再打下一发，直接上抛。
-      const response = await chatCompletionWithRetry({ messages, tools: openAiTools, skillContext, signal: abortSignal });
+      const response = await chatCompletionWithRetry({ messages, tools: deliveryRound ? toOpenAiTools(deliveryTools) : openAiTools, skillContext, signal: abortSignal });
       session.model = response.model || session.model;
       // 渠道与模型必须同源：fallback 可以配另一个 provider，只更新 model 会把
       // 这次调用记到主渠道名下，导致按渠道拆分的成本报表误导用户。
@@ -1144,7 +1153,12 @@ export class Orchestrator {
         const rescued = await this.#rescueUnsentReply({
           rawContent, triggerEntries, session, skillContext
         });
-        if (!rescued.length) break;
+        if (!rescued.length) {
+          if (hasSendMessageDelivery(ctx) || deliveryRound) break;
+          messages.push({role: 'user', content: `【交付未完成】${DELIVERY_REQUIRED}`});
+          forceDeliveryOnly = true;
+          continue;
+        }
 
         toolCalls = rescued;
         // 与上面的 inline 分支同理：把 assistant 条目改成 tool_calls 形态。
@@ -1197,7 +1211,9 @@ export class Orchestrator {
         } catch (error) {
           skillManager.recordError('before-tool', error);
         }
-        const result = blocked
+        const result = deliveryRound && name !== 'send_message'
+          ? {content: '错误：最后交付轮只允许 send_message。' + DELIVERY_REQUIRED, isError: true}
+          : blocked
           ? { content: `错误：${blocked.reason || '该工具调用被 Skill 拒绝'}`, isError: true }
           : await executeTool(toolDefs, ctx, name, argsRaw);
         try {
@@ -1247,7 +1263,7 @@ export class Orchestrator {
         }
         this.sessions.update(session.id);
         this.emit('session-update', session.id);
-        if (name === 'finish') {
+        if (name === 'finish' && !result.isError && hasSendMessageDelivery(ctx)) {
           finish = true;
           // ── 活跃模式状态机 ──
           // 模型 finish 时带回的 activeTopic / "话题结束" 决定活跃期走向：
@@ -1284,7 +1300,7 @@ export class Orchestrator {
       // 判定规则本身在插件里（canEndReplyBatch：失败发送 / 预告式结尾 / 该发图却没发
       // 等等都保留正常循环），这里只负责把现场信息递过去。
       // 插件没启用 / localPolicy 没开时该项为 false，行为与没有这套机制一致。
-      if (!finish) {
+      if (!finish && hasSendMessageDelivery(ctx)) {
         const policyFn = this.#capFirst('reply.local-policy', skillContext);
         if (policyFn) {
           try {
@@ -1312,7 +1328,7 @@ export class Orchestrator {
       // 且本批调用的工具均为交付/副作用类动作、没有包含任何需要读取返回结果的查询型工具（如 web_search / get_recent_messages 等），
       // 且没有发生报错，则直接终止多轮循环。
       // 防止反代或某些模型在工具返回后继续触发无意义的多轮对话甚至自言自语死循环。
-      if (!finish) {
+      if (!finish && hasSendMessageDelivery(ctx)) {
         const hasNewSent = session.sent.length > sentBeforeBatch;
         const hasErrors = toolResults.some((r) => r.isError);
         if (hasNewSent && !hasErrors) {
@@ -1346,11 +1362,14 @@ export class Orchestrator {
       messages.push(...toolResults.map(({ role, tool_call_id, name, content }) => ({ role, tool_call_id, content, name })));
       // 媒体消息跟随在全部 tool 结果之后（OpenAI 校验要求每个 tool_call 都有对应 tool 消息）
       messages.push(...imageUserMessages);
+      if (deliveryRound) break;
       // 给 UI 的简化消息流（跳过纯 tool 结果的重复展示）
     }
 
-    // 收尾：发过话 = done；没发 = noreply（这是正常选项）
-    const status = session.error ? 'error' : (session.sent.length > 0 ? 'done' : 'noreply');
+    // Never label reaction/media-only runs as completed. Failure is terminal and
+    // visible, rather than an infinite tool loop or an invented fallback answer.
+    if (!hasSendMessageDelivery(ctx)) throw new Error('任务未完成：未取得 send_message 的实际成功发送记录，已用完交付机会');
+    const status = session.error ? 'error' : 'done';
     if (status === 'done' && !ctx.taskContextExplicit) {
       try { this.tasks.rememberInteraction(chatKey, triggerEntries, session.sent, ctx.viewedMessageIds, this.store); }
       catch (e) { session.messages.push({ taskContextError: String(e.message).slice(0, 200) }); }

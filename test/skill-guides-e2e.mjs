@@ -40,7 +40,7 @@ try{
  env.llm.state.script.push(
   {toolCalls:[{name:'read_skill_guide',args:{skillId:'core-stickers'}}]},
   {toolCalls:[{name:'list_stickers',args:{query:'可爱'}}]},
-  {toolCalls:[{name:'send_sticker',args:{stickerId:sticker.id}}]}
+  {toolCalls:[{name:'send_sticker',args:{stickerId:sticker.id}},{name:'send_message',args:{messages:'给你这个可爱表情。'}}]}
  );
  env.pushGroupMsg(777,'甲','@测试机 发个可爱表情',1002);
  await waitFor(()=>env.onebotHttp.state.sends.some(s=>s.body.message.some(m=>m.type==='image')),8000);

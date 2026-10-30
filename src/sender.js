@@ -436,7 +436,7 @@ export class SendQueue {
       this.#checkRate(chatKey);
       await this.onebot.call('set_msg_emoji_like', { message_id: result.messageId, emoji_id: result.emojiId, set: result.set });
       states.set(key, result.set);
-      // 算一次已交付，单独贴表情即可结束；不伪造一条 QQ 文字消息进存档。
+      // 记录表情动作回执，不伪造文字；主会话完结另需 send_message 成功凭据。
       this.#recordSent({ chatKey, kind: 'reaction', messageId: result.messageId,
         text: `[${result.set ? '贴表情' : '撤回表情'}] #${result.messageId} ${result.label}` });
       return result;

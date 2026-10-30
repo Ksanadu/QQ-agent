@@ -9,6 +9,7 @@
 import { getConfig } from './config.js';
 import { registerChatFeatureTools } from './chat-feature-tools.js';
 import { assertDeliveryAllowed } from './chat-policy.js';
+import { recordSendMessageDelivery, hasSendMessageDelivery, DELIVERY_REQUIRED } from './reply-completion.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
 import { skillManager } from './skills/manager.js';
@@ -200,11 +201,14 @@ function registerAllTools() {
           replyToMessageId: args.replyToMessageId ?? null,
           atUserId: args.atUserId ?? null
         });
-        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...result.sent.map((s) => ({ type: 'text', text: s.text, at: s.at })));
+        const delivered = result.sent.filter(s => !s.deduped);
+        recordSendMessageDelivery(ctx, delivered);
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...delivered.map((s) => ({ type: 'text', text: s.text, at: s.at })));
         ctx.emit('session-update', ctx.session.id);
         const note = ['已发送。不要输出"已发送"类汇报，继续思考下一步或直接结束。'];
         if (result.failed.length) note.push(`（另有 ${result.failed.length} 条发送失败：${result.failed.map((f) => f.error).join('；')}——成功的不需要重发，失败的请稍后再试或减少条数）`);
-        return ok({ sent: result.sent.length, messageIds: result.sent.map((s) => s.messageId), note: note.join('') });
+        if (!delivered.length) return err('消息因重复被跳过，本轮没有新增文字发送记录。' + DELIVERY_REQUIRED);
+        return ok({ sent: delivered.length, messageIds: delivered.map((s) => s.messageId), note: note.join('') });
       } catch (error) {
         return err(error?.message ?? error);
       }
@@ -462,7 +466,9 @@ function registerAllTools() {
     async execute(ctx, args) {
       try {
         const result = await ctx.sender.reactMessage(ctx.chatKey, args);
-        return ok({ ...result, note: '操作已完成，不要发送“已贴表情”之类的汇报；需要文字回复时正常说话即可。' });
+        return ok({ ...result, note: hasSendMessageDelivery(ctx)
+          ? '贴表情动作成功，当前会话已有文字交付；不必机械汇报“已贴表情”。'
+          : '贴表情动作成功不代表会话完成。' + DELIVERY_REQUIRED });
       } catch (error) { return err(error?.message ?? error); }
     }
   });
@@ -845,7 +851,7 @@ function registerAllTools() {
   registerTool({
     id: 'finish',
     name: '结束会话',
-    description: '明确结束本次处理（表示你看完了、决定了下一步）。看完不打算说话时调用它（summary 写一句给自己看的理由）；说完话想收尾时也可以调用。不调用也可以——直接结束文本输出同样代表结束。处于活跃期时，若判断话题已结束/偏离，也用它结束（reason 填"话题结束"）。',
+    description: '结束当前会话。必须先通过 send_message 向当前聊天实际发送成功；只贴表情、发图、普通输出或发送失败时不可完结。summary 只供管理端记录，不会发给群友。',
     category: 'system',
     icon: '✅',
     parameters: {
@@ -857,6 +863,7 @@ function registerAllTools() {
       required: ['summary']
     },
     async execute(ctx, args) {
+      if (!hasSendMessageDelivery(ctx)) return err(DELIVERY_REQUIRED);
       ctx.session.finishReason = String(args.summary ?? '').slice(0, 300);
       // 活跃模式（chatActive）：模型在 finish 时带回话题总结。
       // orchestrator 读取 session.activeTopic 决定是否开启/维持活跃期。
