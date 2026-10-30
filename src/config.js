@@ -99,8 +99,14 @@ export const DEFAULT_CONFIG = {
     enabled: true,
     searchUrl: 'https://cn.bing.com/search',
     maxResults: 6,
-    // 可选：'bing' | 'deepseek' | 'zhipu' | 'bocha' | 'baidu' | 'metaso'
+    // 可选：'bing' | 'antigravity' | 'deepseek' | 'zhipu' | 'bocha' | 'baidu' | 'metaso'
     provider: 'bing',
+    antigravity: {
+      providerId: 'antigravity',   // 复用模型提供商的地址与密钥，不另存凭据
+      model: 'gemini-3.8-flash-medium',
+      timeoutMs: 90000,
+      maxOutputTokens: 2048
+    },
     deepseek: {
       apiKey: '',                     // 留空时回退环境变量 DEEPSEEK_API_KEY
       baseUrl: 'https://api.deepseek.com/responses',

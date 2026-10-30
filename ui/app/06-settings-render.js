@@ -281,7 +281,7 @@ function renderSearchSection(c) {
   return `
     <h3 id="settings-search">搜索服务</h3>
     <div class="hint" style="margin-bottom:12px">
-      当前提供方：${prov === 'bing' ? 'Bing 网页解析' : prov === 'deepseek' ? 'DeepSeek 原生搜索' : prov === 'zhipu' ? '智谱 Web Search' : prov === 'bocha' ? '博查 AI Search' : prov === 'baidu' ? '百度千帆 AI Search' : prov === 'metaso' ? '秘塔 AI 搜索' : '自定义'}
+      当前提供方：${prov === 'bing' ? 'Bing 网页解析' : prov === 'antigravity' ? 'Antigravity 原生 Google 搜索' : prov === 'deepseek' ? 'DeepSeek 原生搜索' : prov === 'zhipu' ? '智谱 Web Search' : prov === 'bocha' ? '博查 AI Search' : prov === 'baidu' ? '百度千帆 AI Search' : prov === 'metaso' ? '秘塔 AI 搜索' : '自定义'}
       ${(() => {
         // 当前提供方已保存的 Key 状态（与模型 API 页同款提示口径）
         const keyState = {
@@ -292,6 +292,7 @@ function renderSearchSection(c) {
           metaso: c.webSearch?.metaso?.hasApiKey
         }[prov];
         if (prov === 'bing') return ' · 无需 API Key';
+        if (prov === 'antigravity') return ' · 复用所选模型提供商连接';
         if (prov?.startsWith('custom:')) return '';
         return keyState ? ' · 已保存 API Key（不显示）' : ' · 未保存 API Key';
       })()}
@@ -301,6 +302,7 @@ function renderSearchSection(c) {
     <div class="field"><label>搜索提供方</label>
       <select id="cfg-searchprovider">
         <option value="bing" ${prov === 'bing' ? 'selected' : ''}>Bing 网页解析</option>
+        <option value="antigravity" ${prov === 'antigravity' ? 'selected' : ''}>Antigravity 原生 Google 搜索</option>
         <option value="deepseek" ${prov === 'deepseek' ? 'selected' : ''}>DeepSeek 原生搜索</option>
         <option value="zhipu" ${prov === 'zhipu' ? 'selected' : ''}>智谱 Web Search</option>
         <option value="bocha" ${prov === 'bocha' ? 'selected' : ''}>博查 AI Search</option>
@@ -325,6 +327,15 @@ function renderSearchSection(c) {
       </div>
     </div>
     <div class="field" id="bing-search-fields" style="${prov === 'bing' ? '' : 'display:none'}"><label>搜索地址（高级：可替换为兼容 Bing 结果格式的引擎）</label><input type="text" id="cfg-searchurl" value="${esc(c.webSearch?.searchUrl || 'https://cn.bing.com/search')}" /></div>
+    <div id="antigravity-search-fields" style="${prov === 'antigravity' ? '' : 'display:none'}">
+      <div class="field-row">
+        <div class="field"><label>Antigravity 模型提供商</label><select id="cfg-ag-searchprovider">
+          ${(c.providers || []).map(p => `<option value="${esc(p.id)}" ${p.id === (c.webSearch?.antigravity?.providerId || 'antigravity') ? 'selected' : ''}>${esc(p.displayName || p.id)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>Google 搜索使用的 Gemini 模型</label><input type="text" id="cfg-ag-searchmodel" value="${esc(c.webSearch?.antigravity?.model || 'gemini-3.8-flash-medium')}" /></div>
+      </div>
+      <div class="hint">该连接需要支持原生 Gemini 接口与 Google 搜索。单独请求并返回搜索来源，会消耗所选 Gemini 模型额度；未返回真实来源时明确报错，不回退到 Bing。</div>
+    </div>
     <div class="field-row" id="deepseek-search-fields" style="${prov === 'deepseek' ? '' : 'display:none'}">
       <div class="field"><label>DeepSeek 搜索 API Key（留空用环境变量 DEEPSEEK_API_KEY）</label>
         <div style="display:flex;gap:8px">

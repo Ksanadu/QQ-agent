@@ -790,7 +790,7 @@ function registerAllTools() {
   registerTool({
     id: 'web_search',
     name: '联网搜索',
-    description: '联网搜索（Bing），返回标题/URL/摘要列表。适用：实时信息、新闻热点、网络用语/梗的含义、自己不确定的事实。可以换关键词连续搜 2~3 次；对最相关的 1~2 个结果用 web_fetch 读正文，不要只看摘要。',
+    description: '使用配置的搜索服务联网查询，返回来源和摘要；Antigravity 模式使用原生 Google 搜索，另返回带来源的 answer 与实际 searchQueries。适用：实时信息、新闻热点、梗或不确定事实。资料不足可换关键词再搜；需要精确核对时用 web_fetch 读取来源正文。',
     category: 'web',
     icon: '🔍',
     requiresSearch: true,

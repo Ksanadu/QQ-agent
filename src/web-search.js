@@ -7,6 +7,7 @@
 //    合法配置。真正的远程输入（模型传进来的 query）已由 sanitizeQuery 清洗。
 import { getConfig } from './config.js';
 import { safeFetch } from './safe-fetch.js';
+import { antigravitySearch } from './antigravity-search.js';
 
 /** 查询词清洗：去 CQ 码、控制字符、超长截断。 */
 export function sanitizeQuery(query) {
@@ -111,6 +112,7 @@ export async function webSearch(query) {
   if (!clean) throw new Error('查询词为空');
   const cfg = getConfig().webSearch ?? {};
   const provider = String(cfg.provider || 'bing').toLowerCase();
+  if (provider === 'antigravity') return antigravitySearch(clean);
   if (provider === 'deepseek') return deepSeekSearch(clean);
   if (provider === 'zhipu') return zhipuSearch(clean);
   if (provider === 'bocha') return bochaSearch(clean);

@@ -1341,6 +1341,11 @@ async function saveConfig({ quiet = false } = {}) {
       enabled: chk('#cfg-websearch', c.webSearch?.enabled !== false),
       provider: val('#cfg-searchprovider', c.webSearch?.provider || 'bing'),
       searchUrl: val('#cfg-searchurl', c.webSearch?.searchUrl || 'https://cn.bing.com/search').trim() || 'https://cn.bing.com/search',
+      antigravity: {
+        ...(c.webSearch?.antigravity || {}),
+        providerId: val('#cfg-ag-searchprovider', c.webSearch?.antigravity?.providerId || 'antigravity'),
+        model: val('#cfg-ag-searchmodel', c.webSearch?.antigravity?.model || 'gemini-3.8-flash-medium').trim() || 'gemini-3.8-flash-medium'
+      },
       deepseek: {
         ...(c.webSearch?.deepseek || {}),
         ...(enteredDsKey && enteredDsKey !== '******' ? { apiKey: enteredDsKey } : {}),

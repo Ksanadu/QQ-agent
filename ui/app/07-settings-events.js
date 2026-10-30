@@ -335,6 +335,7 @@ function bindSettingsEvents(c) {
     const v = searchProviderSel.value;
     const fields = {
       bing: '#bing-search-fields',
+      antigravity: '#antigravity-search-fields',
       deepseek: '#deepseek-search-fields',
       zhipu: '#zhipu-search-fields',
       bocha: '#bocha-search-fields',
