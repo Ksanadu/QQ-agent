@@ -46,7 +46,43 @@ export function localStickerPath(raw) {
 
 // 图片类型嗅探统一在 image-type.js：原先这里是第三份副本，且**漏了 JPEG 分支**
 // （靠"默认返回 .jpg"歪打正着），加新格式时要改三处、极易漏。
-import { detectImageExt } from './image-type.js';
+import { detectImageExt, detectImageType } from './image-type.js';
+
+/** Read a bounded image from the managed collection, including relocated entries. */
+export function readLocalStickerImage(raw) {
+  const candidate = localStickerPath(raw);
+  if (!candidate) throw new Error('本地表情图片不存在或不在收藏目录内');
+  let fd;
+  try {
+    const root = fs.realpathSync(stickerImagesDir());
+    const file = fs.realpathSync(candidate);
+    const relative = path.relative(root, file);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+      throw new Error('本地表情图片不在收藏目录内，已拒绝读取');
+    }
+    fd = fs.openSync(file, 'r');
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size === 0) throw new Error('本地表情图片为空或不是文件');
+    if (stat.size > 12 * 1024 * 1024) throw new Error('本地表情图片超过 12MB 读取上限');
+    const bytes = Buffer.alloc(stat.size + 1);
+    let size = 0;
+    while (size < bytes.length) {
+      const count = fs.readSync(fd, bytes, size, bytes.length - size, size);
+      if (!count) break;
+      size += count;
+    }
+    if (size !== stat.size) throw new Error('本地表情图片读取时发生变化，请重试');
+    const buffer = bytes.subarray(0, size);
+    const type = detectImageType(buffer);
+    if (!type) throw new Error('本地表情文件不是支持的图片格式');
+    return { buffer, contentType: type.mime };
+  } catch (error) {
+    if (error?.code) throw new Error('本地表情图片读取失败，请刷新表情库后重试');
+    throw error;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
 
 export class StickerManager {
   constructor(onebot) {

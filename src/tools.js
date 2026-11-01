@@ -23,7 +23,7 @@ import { registerTool, listTools } from './tool-registry.js';
 import { readSkillGuide, requireSkillGuide } from './skills/guides.js';
 import { holidayOn, upcomingHoliday } from './holidays.js';
 import { compressImage } from './image-compress.js';
-import { localStickerPath } from './sticker-manager.js';
+import { localStickerPath, readLocalStickerImage } from './sticker-manager.js';
 import { isGifBuffer, gifToVideoDataUrl, resolveGifRoute } from './gif-to-video.js';
 
 /** 当前配置的 GIF 选路（vision/video 开关组合，规则矩阵见 resolveGifRoute 注释）。 */
@@ -35,6 +35,10 @@ function currentGifRoute() {
 async function downloadImageAsDataUrl(url, timeoutMs = 30000) {
   const safeUrl = await validateImageUrl(url);
   const { buffer, contentType } = await safeFetchBinary(safeUrl);
+  return imageBytesAsDataUrl(buffer, contentType);
+}
+
+async function imageBytesAsDataUrl(buffer, contentType) {
   if (!buffer || !buffer.length) throw new Error('图片内容为空');
   // GIF 在这里分岔（规则矩阵见 resolveGifRoute）：
   //   vision+video 都开 → 转 mp4 按 video 部件发（llm.js 自动切视频专用模型）；
@@ -365,7 +369,13 @@ function registerAllTools() {
         const sticker = await ctx.stickers.find(args.stickerId);
         if (!sticker) return err(`找不到表情 ${args.stickerId}`);
         if (!sticker.url) return err('该表情没有图片地址');
-        const r = await downloadImageAsDataUrl(sticker.url);
+        let r;
+        if (String(sticker.url).toLowerCase().startsWith('file:')) {
+          const { buffer, contentType } = readLocalStickerImage(sticker.url);
+          r = await imageBytesAsDataUrl(buffer, contentType);
+        } else {
+          r = await downloadImageAsDataUrl(sticker.url);
+        }
         const built = getImagePartsOrVideo(`表情 ${sticker.id}（备注：${sticker.desc || '无'}）：`, [r]);
         if (r.gifVideo) {
           built.content[0].text += `\n（这是 GIF 动图，已转成 ${r.gifVideo.frames} 帧、最长边 ${Math.max(r.gifVideo.width, r.gifVideo.height) || '≤480'}px 的视频输入，画面按视频发给模型）`;
