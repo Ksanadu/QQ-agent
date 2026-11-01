@@ -7,7 +7,7 @@ const env=await bootApp({config:{wakeDelayMs:25,skills:{'hot-trend-tracker':{ena
  {toolCalls:[{name:'guide-demo__lookup',args:{}}]},
  {toolCalls:[{name:'read_skill_guide',args:{skillId:'guide-demo'}}]},
  {toolCalls:[{name:'guide-demo__lookup',args:{}}]},
- {toolCalls:[{name:'send_message',args:{messages:'查到了实际资料'}}]}
+ {toolCalls:[{name:'send_message',args:{messages:'查到了实际资料'}},{name:'finish',args:{summary:'已回复'}}]}
 ]});
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qq-guide-e2e-'));
 const {skillManager}=await import('../src/skills/manager.js');
@@ -40,7 +40,7 @@ try{
  env.llm.state.script.push(
   {toolCalls:[{name:'read_skill_guide',args:{skillId:'core-stickers'}}]},
   {toolCalls:[{name:'list_stickers',args:{query:'可爱'}}]},
-  {toolCalls:[{name:'send_sticker',args:{stickerId:sticker.id}},{name:'send_message',args:{messages:'给你这个可爱表情。'}}]}
+  {toolCalls:[{name:'send_sticker',args:{stickerId:sticker.id}},{name:'send_message',args:{messages:'给你这个可爱表情。'}},{name:'finish',args:{summary:'已回复并发表情'}}]}
  );
  env.pushGroupMsg(777,'甲','@测试机 发个可爱表情',1002);
  await waitFor(()=>env.onebotHttp.state.sends.some(s=>s.body.message.some(m=>m.type==='image')),8000);

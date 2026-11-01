@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { bootApp, waitFor, sleep } from './_harness.mjs';
 const env = await bootApp({ config: { wakeDelayMs: 30, store: { contextSliderPos: 10, peakSchedule: { enabled: false } }, conversationListener: { enabled: true, idleMs: 6000 } }, script: [
-  { delayMs: 1400, toolCalls: [{ name: 'send_message', args: { messages: '第一问的回答' } }] },
+  { delayMs: 1400, toolCalls: [{ name: 'send_message', args: { messages: '第一问的回答' } }, { name: 'finish', args: { summary: '已回复' } }] },
   { content: JSON.stringify({ related: true, ids: [2], reason: '对刚才的请求补充要求' }) },
-  { toolCalls: [{ name: 'send_message', args: { messages: '补充要求的回答' } }] },
+  { toolCalls: [{ name: 'send_message', args: { messages: '补充要求的回答' } }, { name: 'finish', args: { summary: '已跟进' } }] },
   { delayMs: 2000, content: JSON.stringify({ related: true, ids: [99], reason: '伪造旧 ID' }) }
 ] });
 try {

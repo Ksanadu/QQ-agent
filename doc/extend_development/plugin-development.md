@@ -282,7 +282,8 @@ export const hooks = {
 | `reply.salvage-lines` | `src/reply-rescue.js` | `{ text, trigger, alreadySent, api }` | 同上 |
 | `reply.is-planning-text` | `src/reply-rescue.js` | `{ text }` | `{ planning: boolean }` |
 | `reply.grounded-select` | `src/reply-rescue.js`、`orchestrator.js` | `{ remember }` / `{ reset }` / `{ proposed, sent }` | `{ picked: string[] }` |
-| `reply.local-policy` | `orchestrator.js` | `{ api, entries, batch }` | `{ shouldEnd, budget, ... }` |
+
+主循环已停止消费旧的 `reply.local-policy` 能力：文字发送成功只解锁正常完成，不能让本地策略提前截断后续工具调用。完成条件与退出方式见 [主会话完成条件](../reply-completion.md)。
 
 ### 4.6 多提供者能力
 

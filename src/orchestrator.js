@@ -1189,8 +1189,6 @@ export class Orchestrator {
       if (lastAssistantUi?.role === 'assistant' && Array.isArray(toolCalls) && toolCalls.length) {
         if (!lastAssistantUi.tool_calls) lastAssistantUi.tool_calls = structuredClone(toolCalls);
       }
-      // 记下这批工具的起点：下面要用"本批新增了哪些发送记录"判断本地模型能不能收尾
-      const sentBeforeBatch = session.sent.length;
       for (const call of toolCalls) {
         const name = call?.function?.name ?? '';
         const argsRaw = call?.function?.arguments ?? '{}';
@@ -1293,71 +1291,9 @@ export class Orchestrator {
         }
       }
 
-      // ── 本地小模型的收尾策略（reply-safety 插件，默认关闭）──
-      // 一批"只发送、不遗留待办"的工具结果之后允许提前结束，省掉没有意义的下一轮
-      // （本地小模型多跑一轮既慢又容易把已说好的话改坏）。
-      // 判定规则本身在插件里（canEndReplyBatch：失败发送 / 预告式结尾 / 该发图却没发
-      // 等等都保留正常循环），这里只负责把现场信息递过去。
-      // 插件没启用 / localPolicy 没开时该项为 false，行为与没有这套机制一致。
-      if (!finish && hasSendMessageDelivery(ctx)) {
-        const policyFn = this.#capFirst('reply.local-policy', skillContext);
-        if (policyFn) {
-          try {
-            const r = policyFn({
-              api: cfg.api || {},
-              entries: triggerEntries,
-              batch: {
-                calls: toolCalls,
-                results: toolResults,
-                newSent: session.sent.slice(sentBeforeBatch),
-                allSent: session.sent,
-                searched: webSearchCount > 0
-              }
-            });
-            if (r?.shouldEnd) {
-              finish = true;
-              session.finishReason = session.finishReason || '本地收尾策略判定：本批已交付完毕';
-            }
-          } catch (error) { skillManager.recordError('reply-safety', error); }
-        }
-      }
-
-      // ── 核心交付收尾加固 ──
-      // 当本批工具已成功产生外部消息交付（如 send_message / send_sticker），
-      // 且本批调用的工具均为交付/副作用类动作、没有包含任何需要读取返回结果的查询型工具（如 web_search / get_recent_messages 等），
-      // 且没有发生报错，则直接终止多轮循环。
-      // 防止反代或某些模型在工具返回后继续触发无意义的多轮对话甚至自言自语死循环。
-      if (!finish && hasSendMessageDelivery(ctx)) {
-        const hasNewSent = session.sent.length > sentBeforeBatch;
-        const hasErrors = toolResults.some((r) => r.isError);
-        if (hasNewSent && !hasErrors) {
-          const DELIVERY_ONLY_TOOLS = new Set([
-            'send_message',
-            'send_saved_image',
-            'share_bilibili_video',
-            'send_sticker',
-            'send_to',
-            'send_poke',
-            'react_message',
-            'collect_sticker',
-            'sticker_note',
-            'memory_append',
-            'memory_remove',
-            'set_reminder',
-            'cancel_reminder',
-            'report_feedback',
-            'finish'
-          ]);
-          const onlyDeliveryTools = toolCalls.every((call) => {
-            const name = call?.function?.name ?? '';
-            return DELIVERY_ONLY_TOOLS.has(name) || name.startsWith('tts-say') || name.startsWith('tts_say');
-          });
-          if (onlyDeliveryTools) {
-            finish = true;
-            session.finishReason = session.finishReason || '交付完成：消息已成功发出，自动收尾';
-          }
-        }
-      }
+      // 成功发送文字只解锁正常完成，不替模型提前结束。
+      // 将工具回执交回模型，让它继续发表情等操作，或主动 finish / 停止调用；
+      // 正常轮次上限和最后交付轮仍负责约束执行次数。
       messages.push(...toolResults.map(({ role, tool_call_id, name, content }) => ({ role, tool_call_id, content, name })));
       // 媒体消息跟随在全部 tool 结果之后（OpenAI 校验要求每个 tool_call 都有对应 tool 消息）
       messages.push(...imageUserMessages);

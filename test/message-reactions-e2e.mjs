@@ -2,18 +2,19 @@ import assert from 'node:assert/strict';
 import { bootApp, waitFor } from './_harness.mjs';
 const env = await bootApp({ config: { wakeDelayMs: 100, store: { historyCount: 20 } }, script: [
   { toolCalls: [{ name: 'react_message', args: { messageId: -101, emojiId: '76' } }] },
-  { toolCalls: [{ name: 'send_message', args: { messages: '给你点个赞。' } }] },
+  { toolCalls: [{ name: 'send_message', args: { messages: '给你点个赞。' } }, { name: 'finish', args: { summary: '已回复' } }] },
   { toolCalls: [
     { name: 'react_message', args: { messageId: -800, emojiId: '66' } },
     { name: 'react_message', args: { messageId: -800, emojiId: '99' } },
-    { name: 'send_message', args: { messages: '替你开心！' } }
+    { name: 'send_message', args: { messages: '替你开心！' } },
+    { name: 'finish', args: { summary: '已回复' } }
   ] },
   { toolCalls: [{ name: 'react_message', args: { messageId: -101, emojiId: '76' } }] },
   { toolCalls: [{ name: 'finish', args: { reason: '没有可贴的相关消息' } }] },
-  { toolCalls: [{ name: 'send_message', args: { messages: '目标不在可操作窗口内，请重新发一下。' } }] },
+  { toolCalls: [{ name: 'send_message', args: { messages: '目标不在可操作窗口内，请重新发一下。' } }, { name: 'finish', args: { summary: '已说明范围' } }] },
   { toolCalls: [{ name: 'react_message', args: { messageId: 104, emojiId: '66' } }] },
   { toolCalls: [{ name: 'finish', args: { reason: '接口失败，安静结束' } }] },
-  { toolCalls: [{ name: 'send_message', args: { messages: '这次贴表情失败了。' } }] }
+  { toolCalls: [{ name: 'send_message', args: { messages: '这次贴表情失败了。' } }, { name: 'finish', args: { summary: '已说明失败' } }] }
 ] });
 const { app, pushGroupMsg, waitSessionDone, llm, onebotHttp } = env;
 const waitForMessageRun = async (mid) => waitFor(() => {

@@ -3,10 +3,10 @@ import { bootApp, waitFor, sleep } from './_harness.mjs';
 
 // Actual worker -> mock LLM -> main orchestrator handoff, no keyword shortcut.
 const env = await bootApp({ config: { wakeDelayMs: 30, store: { contextTier: 1, contextSliderPos: 10, peakSchedule: { enabled: false } }, conversationListener: { enabled: true, idleMs: 4000 } }, script: [
-  { toolCalls: [{ name: 'send_message', args: { messages: '第一张构图不错，你想比较哪里？' } }] },
+  { toolCalls: [{ name: 'send_message', args: { messages: '第一张构图不错，你想比较哪里？' } }, { name: 'finish', args: { summary: '已回复' } }] },
   { content: JSON.stringify({ related: false, ids: [], reason: '群友在聊别的游戏' }) },
   { content: JSON.stringify({ related: true, ids: [4, 99999], reason: '继续回答机器人的比较问题' }) },
-  { toolCalls: [{ name: 'send_message', args: { messages: '第二张可以再看一下光线。' } }] }
+  { toolCalls: [{ name: 'send_message', args: { messages: '第二张可以再看一下光线。' } }, { name: 'finish', args: { summary: '已跟进' } }] }
 ] });
 try {
   const { app, pushGroupMsg, llm } = env, events = [];
