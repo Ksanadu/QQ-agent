@@ -7,6 +7,7 @@ const env=await bootApp({config:{wakeDelayMs:25,skills:{'hot-trend-tracker':{ena
  {toolCalls:[{name:'guide-demo__lookup',args:{}}]},
  {toolCalls:[{name:'read_skill_guide',args:{skillId:'guide-demo'}}]},
  {toolCalls:[{name:'guide-demo__lookup',args:{}}]},
+ {toolCalls:[{name:'guide-demo__lookup',args:{}}]},
  {toolCalls:[{name:'send_message',args:{messages:'查到了实际资料'}},{name:'finish',args:{summary:'已回复'}}]}
 ]});
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'qq-guide-e2e-'));
@@ -16,19 +17,28 @@ const {normalizeManifest}=await import('../src/skills/manifest.js');
 const marker='GUIDE_DETAIL_ONLY_AFTER_READ';let calls=0;
 try{
  fs.writeFileSync(path.join(dir,'QUICK_REFERENCE.md'),marker+'\n使用查询结果，不得编造。');
- skillManager.register({manifest:normalizeManifest({id:'guide-demo',name:'Demo lookup',prompt:{guide:{file:'QUICK_REFERENCE.md',when:'需要查测试资料时'}}}).manifest,dir,kind:'skill'});
- registerTool({id:'guide-demo__lookup',name:'测试查询',skillId:'guide-demo',parameters:{type:'object',properties:{},additionalProperties:false},execute:async()=>{calls++;return {content:'实际资料:123'};}});
+ const manifest=normalizeManifest({id:'guide-demo',name:'Demo lookup',prompt:{guide:{file:'QUICK_REFERENCE.md',when:'需要查测试资料时'}}}).manifest;
+ const register=()=>skillManager.register({manifest,dir,kind:'skill'});
+ register();
+ registerTool({id:'guide-demo__lookup',name:'测试查询',skillId:'guide-demo',parameters:{type:'object',properties:{},additionalProperties:false},execute:async()=>{
+   calls++;
+   if(calls===1) register(); // A reload between successful queries must not erase the guide read.
+   return {content:'实际资料:123'};
+ }});
  env.app.orchestrator.refreshToolDefs();
  env.pushGroupMsg(777,'甲','@测试机 查一下资料',1001);
  await waitFor(()=>env.onebotHttp.state.sends.length>0,8000);
  await waitFor(()=>env.app.orchestrator.runningChats.size===0,3000);
- assert.equal(calls,1,'未读时的第一次技能调用必须被拦截');
+ assert.equal(calls,2,'未读调用被拦截；读后查询及不变文档重载后的查询均可执行');
  const req=env.llm.state.requests;
  assert.equal(req[0].messages.find(x=>x.role==='system').content.includes(marker),false);
  assert.match(req[0].messages.find(x=>x.role==='system').content,/read_skill_guide/);
  assert.ok(req[1].messages.some(x=>x.role==='tool'&&String(x.content).includes('请先调用 read_skill_guide')));
  assert.ok(req[2].messages.some(x=>x.role==='tool'&&String(x.content).includes(marker)));
  assert.ok(req[3].messages.some(x=>x.role==='tool'&&String(x.content).includes('实际资料:123')));
+ assert.ok(req[4].messages.some(x=>x.role==='tool'&&String(x.content).includes('实际资料:123')));
+ const session=env.app.sessions.listSummaries(20).map(s=>env.app.sessions.get(s.id)).find(s=>s.trigger?.some(m=>m.mid===1001));
+ assert.equal(session.messages.filter(m=>m.toolCall?.name==='read_skill_guide').length,1,'unchanged reload must not require a second guide read');
  const start=req.length;
  const imageDir=path.join(process.env.QQ_AGENT_DATA_DIR,'sticker-images');fs.mkdirSync(imageDir,{recursive:true});
  const imageFile=path.join(imageDir,'on-demand.png');fs.writeFileSync(imageFile,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j9uoAAAAASUVORK5CYII=','base64'));
@@ -51,5 +61,6 @@ try{
  assert.ok(env.llm.state.requests[start+1].messages.some(m=>m.role==='tool'&&String(m.content).includes('runtime')));
  assert.ok(env.llm.state.requests[start+2].messages.some(m=>m.role==='tool'&&String(m.content).includes(sticker.id)));
  console.log('PASS real ingest → short skill index → blocked unread call → read guide tool → skill execution → queued QQ reply; full guide absent from initial system prompt');
+ console.log('PASS a successful query followed by an unchanged skill reload permits the next query with one guide read');
  console.log('PASS core sticker guide → on-demand catalogue → real queued sticker send; no automatic catalogue injection');
 }finally{skillManager.unregister('guide-demo');await env.teardown();fs.rmSync(dir,{recursive:true,force:true});}

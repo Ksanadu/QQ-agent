@@ -45,7 +45,16 @@ try{
  fs.writeFileSync(file,'已更新的用法');
  assert.throws(()=>requireSkillGuide(manager,ctx,'guide-demo'),/重读/);
  readSkillGuide(manager,ctx,'guide-demo');requireSkillGuide(manager,ctx,'guide-demo');
+ const beforeReload=manager.registry.get('guide-demo');
+ register();assert.notEqual(manager.registry.get('guide-demo'),beforeReload);
+ requireSkillGuide(manager,ctx,'guide-demo');
+ const relocated=path.join(dir,'relocated');fs.mkdirSync(relocated);
+ fs.copyFileSync(file,path.join(relocated,'QUICK_REFERENCE.md'));
+ manager.register({manifest,dir:relocated,kind:'skill'});
+ assert.throws(()=>requireSkillGuide(manager,ctx,'guide-demo'),/read_skill_guide/,'identical content at a different location still requires reading');
+ readSkillGuide(manager,ctx,'guide-demo');requireSkillGuide(manager,ctx,'guide-demo');
  register();assert.throws(()=>requireSkillGuide(manager,ctx,'guide-demo'),/read_skill_guide/);
+ readSkillGuide(manager,ctx,'guide-demo');requireSkillGuide(manager,ctx,'guide-demo');
  cfg.skills['guide-demo']={enabled:false};setRuntimeConfig(cfg);
  assert.equal(manager.getPromptSections().length,0);
  assert.throws(()=>readSkillGuide(manager,ctx,'guide-demo'),/已关闭/);
@@ -80,5 +89,5 @@ try{
  assert.notEqual(migrate().status,0);
  assert.deepEqual(JSON.parse(fs.readFileSync(manifestFile,'utf8')),original);
  assert.equal(fs.readFileSync(guideFile,'utf8'),saved);
- console.log('PASS guide indexes, scoped reads, required read, reread after file/reload, disabled/missing/oversize/UTF-8 rejection, traversal and junction escape, dynamic data preserved');
+ console.log('PASS guide indexes, scoped reads, unchanged reload reuse, changed content/location reread, disabled/missing/oversize/UTF-8 rejection, traversal and junction escape, dynamic data preserved');
 }finally{fs.rmSync(dir,{recursive:true,force:true});}

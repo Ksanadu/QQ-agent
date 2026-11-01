@@ -81,7 +81,7 @@
     "check:load": "node scripts/preload-check.mjs",
     "test:wakesem": "node test/wake-semantics-test.mjs",
     "test:chat-features": "node test/chat-history-tasks.mjs && node test/snowluma-ptt-patch-test.mjs && node test/qq-speech-test.mjs && node test/image-album-test.mjs && node test/bilibili-card-test.mjs && node test/conversation-listener-test.mjs && node test/conversation-listener-race.mjs && node test/conversation-listener-settings-ui.mjs",
-    "test:skill-guides": "node test/skill-guides-test.mjs && node test/skill-guides-e2e.mjs"
+    "test:skill-guides": "node test/skill-guides-test.mjs && node test/skill-guides-e2e.mjs && node test/skill-watch-test.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1",

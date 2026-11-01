@@ -555,6 +555,22 @@ export function watchPlugins({ log = console.log, onReload, roots: rootsOpt = nu
   let reloading = false;      // 重入保护：一次 reload 超 500ms 时，防抖计时器可能再触发第二次
   let pendingAgain = false;   // reload 期间又来了变化 → 结束后再补一轮
   const watchers = [];
+  // Windows can emit change merely because a read updated the last-access time.
+  // Compare write/identity metadata before reloading; deliberately omit atime/ctime.
+  const observed = new Map();
+  const stamp = (file) => {
+    try {
+      const s = fs.lstatSync(file);
+      return [s.dev, s.ino, s.mode, s.size, s.mtimeMs, s.birthtimeMs].join(':');
+    } catch { return null; }
+  };
+  const remember = (file) => {
+    observed.set(file, stamp(file));
+    try {
+      if (!fs.lstatSync(file).isDirectory()) return;
+      for (const entry of fs.readdirSync(file)) remember(path.join(file, entry));
+    } catch { /* Missing or unreadable paths are handled by the normal reload. */ }
+  };
   const runReload = async (filename) => {
     if (reloading) { pendingAgain = true; return; }
     reloading = true;
@@ -576,7 +592,16 @@ export function watchPlugins({ log = console.log, onReload, roots: rootsOpt = nu
 
   for (const root of roots) {
     try {
-      watchers.push(fs.watch(root, { recursive: true }, (_e, filename) => scheduleReload(filename)));
+      remember(root);
+      watchers.push(fs.watch(root, { recursive: true }, (_e, filename) => {
+        if (filename) {
+          const file = path.resolve(root, String(filename));
+          const current = stamp(file);
+          if (observed.has(file) && observed.get(file) === current) return;
+          observed.set(file, current);
+        }
+        scheduleReload(filename);
+      }));
     } catch (error) {
       log(`[skill] 无法监听 ${root}：${error?.message ?? error}`);
     }

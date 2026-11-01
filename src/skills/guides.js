@@ -39,7 +39,7 @@ function loadGuide(manager, id, context) {
     const bytes = buffer.subarray(0, size);
     const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes).trim();
     if (!content) throw new Error('速查文档为空');
-    return { skill, content, signature: createHash('sha256').update(bytes).digest('hex') };
+    return { skill, file, content, signature: createHash('sha256').update(bytes).digest('hex') };
   } catch (error) {
     // Do not expose filesystem paths in a model-visible failure.
     if (error?.code === 'ENOENT') throw new Error('速查文档不存在，请管理员补齐');
@@ -55,7 +55,8 @@ export function readSkillGuide(manager, context, id) {
   const result = loadGuide(manager, id, context);
   let read = readByContext.get(context);
   if (!read) { read = new Map(); readByContext.set(context, read); }
-  read.set(id, { skill: result.skill, signature: result.signature });
+  // Reloads replace skill objects even when this exact guide is unchanged.
+  read.set(id, { file: result.file, signature: result.signature });
   return { skillId: id, location: guideLocation(result.skill), content: result.content };
 }
 
@@ -64,7 +65,7 @@ export function requireSkillGuide(manager, context, skillId) {
   if (!skill?.manifest.prompt?.guide) return;
   const current = loadGuide(manager, skillId, context);
   const previous = readByContext.get(context)?.get(skillId);
-  if (!previous || previous.skill !== skill || previous.signature !== current.signature) {
-    throw new Error(`请先调用 read_skill_guide({"skillId":"${skillId}"}) 读取当前速查文档，再使用该技能；文档更新后需重读。`);
+  if (!previous || previous.file !== current.file || previous.signature !== current.signature) {
+    throw new Error(`请先调用 read_skill_guide({"skillId":"${skillId}"}) 读取当前速查文档，再使用该技能；文档内容或位置变化后需重读。`);
   }
 }
