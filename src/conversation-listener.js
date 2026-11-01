@@ -11,6 +11,7 @@ export class ConversationListeners {
     this.tasks = new Map(); this.onRelated = onRelated; this.onCheck = onCheck; this.onClose = onClose;
   }
   start(chatKey, { config, anchor, parentSessionId, idleMs = 60000 }) {
+    idleMs = normalizeListenerIdleMs(idleMs);
     this.stop(chatKey, '新会话接管监听');
     const until = Date.now() + idleMs;
     const worker = new Worker(new URL('./conversation-listener-worker.js', import.meta.url), { workerData: { config, anchor: anchor.map(listenerMessage), idleMs, until } });
@@ -48,4 +49,9 @@ export class ConversationListeners {
   stop(chatKey, reason = '监听已停止') { this.tasks.get(chatKey)?.close(reason); }
   stopAll() { for (const key of [...this.tasks.keys()]) this.stop(key); }
   summary() { return [...this.tasks].map(([chatKey, t]) => ({ chatKey, parentSessionId: t.parentSessionId, until: t.until, checks: t.checked })); }
+}
+
+export function normalizeListenerIdleMs(value) {
+  const ms = Number(value);
+  return Number.isFinite(ms) && ms > 0 ? Math.min(3600000, Math.max(1000, Math.round(ms))) : 60000;
 }

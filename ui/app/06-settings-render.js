@@ -931,6 +931,19 @@ return `
     })}
 
     ${fold({
+      id: 'card-conversation-listener',
+      icon: '👂',
+      title: '独立关联监听',
+      sub: '免 @ 接续对话 / 监听时长',
+      body: `
+      <div class="field"><label for="cfg-listener-seconds">监听持续时间（秒）</label>
+        <input type="number" id="cfg-listener-seconds" min="1" max="3600" step="1" value="${esc(Math.min(3600, Math.max(1, Math.round((Number(c.conversationListener?.idleMs) || 60000) / 1000))))}" />
+        <div class="hint">可设置 1～3600 秒，默认 60 秒。相关对话会重新计时，无关消息不续期；持续无相关对话后结束监听。</div>
+      </div>
+      <div class="hint">自动保存，对新开启的监听生效。</div>`
+    })}
+
+    ${fold({
       id: 'card-cmdmute',
       icon: '🔇',
       title: '指令禁言',

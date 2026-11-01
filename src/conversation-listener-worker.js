@@ -10,7 +10,7 @@ function close(reason) {
   parentPort.postMessage({ type: 'closed', reason }); parentPort.close();
 }
 function arm() {
-  clearTimeout(timer); timer = setTimeout(() => close('一分钟内无相关对话，监听结束'), Math.max(0, until - Date.now()));
+  clearTimeout(timer); timer = setTimeout(() => close('持续无相关对话，监听结束'), Math.max(0, until - Date.now()));
 }
 function parseVerdict(content, entries) {
   const raw = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');

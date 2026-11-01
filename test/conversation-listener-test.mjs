@@ -16,6 +16,7 @@ try {
   await waitFor(() => app.orchestrator.runningChats.size === 0);
   assert.equal(app.orchestrator.listeners.tasks.size, 1);
   const first = app.orchestrator.listeners.tasks.get('group:456'), deadline = first.until;
+  assert.equal(app.sessions.get(first.sessionId).triggerSummary, '独立关联监听');
   pushGroupMsg(999, '乙', '有人打游戏吗', -502); // local ID 3 (bot response occupies 2)
   await waitFor(() => events.some(e => e.type === 'listener-check'));
   assert.equal(app.orchestrator.listeners.tasks.get('group:456').until, deadline, 'unrelated traffic must not refresh lifetime');
@@ -35,10 +36,20 @@ try {
   pushGroupMsg(777, '甲', '窗口已经结束，不要再自动接话', -504);
   await sleep(650); assert.equal(llm.state.requests.length, before);
   // Explicit triggers still work and restart a single worker; pausing kills it.
+  const saved = await env.request('POST', '/api/config', {body: {conversationListener: {idleMs: 150000}}});
+  assert.equal(saved.data.config.conversationListener.idleMs, 150000);
+  llm.state.script[before] = {toolCalls: [
+    {name: 'send_message', args: {messages: '已开启新的监听'}}, {name: 'finish', args: {summary: '已回复'}}
+  ]};
   pushGroupMsg(777, '甲', '@覆盖Bot 再开启一次', -505);
   await waitFor(() => app.orchestrator.listeners.tasks.size === 1);
+  const extended = app.orchestrator.listeners.tasks.get('group:456');
+  assert.ok(extended.until > Date.now() + 145000, 'configured duration above one minute must not be capped at 60 seconds');
+  assert.ok(extended.until <= Date.now() + 150000);
+  assert.equal(app.sessions.get(extended.sessionId).triggerSummary, '独立关联监听');
+  await waitFor(() => app.orchestrator.runningChats.size === 0);
   app.orchestrator.setPaused(true);
   assert.equal(app.orchestrator.listeners.tasks.size, 0);
   assert.equal(app.orchestrator.listenerRelevant.size, 0);
-  console.log('PASS Phase 5: real isolated worker + LLM classification, unrelated no reply/no extension, exact relevant ID handoff without @, child usage audit, timeout termination, restart and pause cleanup');
+  console.log('PASS Phase 5: real worker + LLM classification, unrelated no extension, exact relevant handoff, timeout, configurable duration above 60 seconds, plain listener label and pause cleanup');
 } finally { await env.teardown(); }

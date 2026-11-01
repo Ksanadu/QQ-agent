@@ -371,7 +371,7 @@ export const DEFAULT_CONFIG = {
   extensions: {
     hotReload: true
   },
-  // 被触发后开启独立 LLM 监听；仅相关消息可免 @ 继续，闲置一分钟自动退出。
+  // 被触发后开启独立 LLM 监听；仅相关消息可免 @ 继续，闲置达到配置时长后退出。
   conversationListener: { enabled: true, idleMs: 60000 },
   // 桌面端/控制台
   server: {

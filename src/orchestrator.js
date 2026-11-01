@@ -1895,8 +1895,8 @@ export class Orchestrator {
     if (!chatAllowed(kind, id, cfg)) return;
     const state = this.listeners.start(chatKey, { config: cfg,
       anchor: this.store.recent(chatKey, { limit: 20 }).filter(m => !m.recalled), parentSessionId: parent.id,
-      idleMs: Math.min(60000, Math.max(1000, Number(cfg.conversationListener?.idleMs) || 60000)) });
-    const sub = this.sessions.create({ chatKey, trigger: [], triggerSummary: '独立关联监听（闲置一分钟自动结束）' });
+      idleMs: cfg.conversationListener?.idleMs });
+    const sub = this.sessions.create({ chatKey, trigger: [], triggerSummary: '独立关联监听' });
     sub.taskType = 'conversation-listener'; sub.parentSessionId = parent.id;
     sub.model = cfg.api.model; state.sessionId = sub.id;
     parent.listenerSessionId = sub.id;

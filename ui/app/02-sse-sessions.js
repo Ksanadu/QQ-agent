@@ -338,6 +338,11 @@ function startListPoller() {
 
 startListPoller();
 
+function sessionTriggerLabel(s, text = s.triggerSummary || (typeof s.trigger === 'string' ? s.trigger : '')) {
+  return s.taskType === 'conversation-listener' || text === '独立关联监听（闲置一分钟自动结束）'
+    ? '独立关联监听' : text;
+}
+
 function renderSessionList() {
   const box = $('#session-items');
   state.seenSessionIds = state.seenSessionIds || new Set();
@@ -374,7 +379,7 @@ function renderSessionList() {
           <span class="session-chat">${esc(chatName)}</span>
           <span class="session-time">${fmtTime(s.startedAt)}</span>
         </div>
-        <div class="session-trigger">${esc(s.trigger || '')}</div>
+        <div class="session-trigger">${esc(sessionTriggerLabel(s, s.trigger || ''))}</div>
         <div class="session-meta">
           <span class="status-badge status-${s.status}">${STATUS_LABEL[s.status] || s.status}</span>
           ${waitHtml}
@@ -536,7 +541,7 @@ function renderSessionDetail(s) {
         ${canDelete ? `<button class="btn btn-small btn-danger" id="session-delete-btn" style="margin-left:6px" title="删除这条会话记录">删除</button>` : ''}
       </h2>
       <div class="sub">
-        <span>触发：${esc(s.triggerSummary || (s.trigger === 'proactive' ? '主动机会' : '-'))}</span>
+        <span>触发：${esc(sessionTriggerLabel(s, s.triggerSummary || (s.trigger === 'proactive' ? '主动机会' : '-')))}</span>
         <span>开始 ${fmtClock(s.startedAt)}${s.endedAt ? ` · 结束 ${fmtClock(s.endedAt)}` : ' · 进行中'}</span>
         <span>模型 ${esc(s.model || '-')}</span>
         <span>${usage.calls || 0} 次调用 · ${fmtTokens(usage.promptTokens)} 入 / ${fmtTokens(usage.completionTokens)} 出 / ${fmtTokens(usage.totalTokens)} 总</span>
@@ -697,7 +702,7 @@ function renderSessionDetail(s) {
   // 删除这条会话记录
   const delBtn = $('#session-delete-btn');
   if (delBtn) delBtn.addEventListener('click', async () => {
-    if (!(await uiConfirm(`确定删除这条会话记录？\n\n触发：${s.triggerSummary || '-'}\n时间：${fmtClock(s.startedAt)}\n\n删除后不可恢复（不影响用量统计的历史数据）。`))) return;
+    if (!(await uiConfirm(`确定删除这条会话记录？\n\n触发：${sessionTriggerLabel(s, s.triggerSummary || '-')}\n时间：${fmtClock(s.startedAt)}\n\n删除后不可恢复（不影响用量统计的历史数据）。`))) return;
     try {
       await api(`/api/sessions/${s.id}`, { method: 'DELETE' });
       state.currentSessionId = null;
