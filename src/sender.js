@@ -75,6 +75,8 @@ export class SendQueue {
   }
 
   #guard(chatKey) {
+    const session = this.deliveryContext.getStore()?.session;
+    if (session?.status && session.status !== 'running') throw new Error('本轮回复已结束或中止，停止发送');
     assertDeliveryAllowed(chatKey, getConfig(), this.deliveryContext.getStore()?.session.chatKey || '');
   }
 
@@ -208,7 +210,8 @@ export class SendQueue {
         assertPendingDelivery(options);
         const data = await this.onebot.sendText(kind, id, text, {
           replyToMessageId: i === 0 ? options.replyToMessageId : null, // 引用挂在第一条上：回的就是那条
-          atUserId: i === 0 ? options.atUserId : null
+          atUserId: i === 0 ? options.atUserId : null,
+          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
         });
         this.#markSent(chatKey, dedupeText);   // 只有 OneBot 成功返回后才记入去重窗口
         const ts = Date.now();
@@ -255,7 +258,9 @@ export class SendQueue {
       // 重发一次；再不行转成 base64 内联发（体积上限 15MB，超限明确报错）。
       const sendVia = (ref) => (this.#guard(chatKey), this.onebot.sendSticker(kind, id, ref, {
         replyToMessageId: options.replyToMessageId ?? null,
-        atUserId: options.atUserId ?? null
+        atUserId: options.atUserId ?? null,
+        verificationRef: sticker.md5 || null,
+        beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
       }));
       let data;
       const primary = String(sticker.url || '').trim();
@@ -355,7 +360,9 @@ export class SendQueue {
         assertPendingDelivery(options);
         data = await this.onebot.sendImage(kind, id, ref, {
           replyToMessageId: options.replyToMessageId ?? null,
-          atUserId: options.atUserId ?? null
+          atUserId: options.atUserId ?? null,
+          verificationRef: dataUrl || null,
+          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
         });
       } catch (error) {
         // file:// 失败 → 回退 base64（协议端不同机、路径不可读、权限不足等）。
@@ -366,7 +373,8 @@ export class SendQueue {
         assertPendingDelivery(options);
         data = await this.onebot.sendImage(kind, id, dataUrl, {
           replyToMessageId: options.replyToMessageId ?? null,
-          atUserId: options.atUserId ?? null
+          atUserId: options.atUserId ?? null,
+          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
         });
       }
       this.#markSent(chatKey, `__img__${dedupeKey}`);   // 发图同样：成功后才记账
@@ -411,7 +419,9 @@ export class SendQueue {
       this.#checkRate(chatKey);
       await sleep(randInt(800, 1800));   // 视频/多图体积大，停顿比文字长一点
       this.#guard(chatKey);
-      const data = await this.onebot.sendSegments(kind, id, segs);
+      const data = await this.onebot.sendSegments(kind, id, segs, {
+        beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+      });
       this.#markSent(chatKey, `__media__${dedupeKey}`);   // 成功后才记账
       const ts = Date.now();
       this.store.appendSelf(chatKey, { text: label, ts, mid: data?.message_id ?? null });

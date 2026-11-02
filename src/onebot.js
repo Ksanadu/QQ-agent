@@ -5,6 +5,7 @@ import { transcribeQQVoice } from './qq-speech.js';
 import { assertProtectedAction } from './protected-actions.js';
 import { sanitizeUserText, escapeCqText } from './util.js';
 import { skillManager } from './skills/manager.js';
+import { DeliveryVerifier } from './delivery-verification.js';
 
 const RECONNECT_MIN_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
@@ -84,6 +85,7 @@ export class OneBotClient {
     this.everConnected = false;
     this.lastConnectError = '';
     this.selfInfo = null;      // { user_id, nickname }
+    this.deliveryVerifier = new DeliveryVerifier();
     this.#closedByUs = false;
     this.statusListeners = new Set();
   }
@@ -208,6 +210,7 @@ export class OneBotClient {
       let event = null;
       try { event = JSON.parse(String(data)); } catch { return; }
       if (!event || typeof event !== 'object') return;
+      this.deliveryVerifier.observe(event);
       try { this.onEvent(event); } catch (error) { console.error('[onebot] 事件处理出错:', error); }
     });
     socket.on('close', () => {
@@ -256,7 +259,28 @@ export class OneBotClient {
   }
 
   /** OneBot HTTP API（发送与查询都走这里）。 */
-  async call(action, params = {}, timeoutMs = null) {
+  async call(action, params = {}, timeoutMs = null, delivery = {}) {
+    return this.deliveryVerifier.run(action, params, () => this.#callVerified(action, params, timeoutMs, delivery));
+  }
+
+  async #callVerified(action, params, timeoutMs, delivery) {
+    // Optional known bytes/hash identify media whose URL changes after QQ upload.
+    // They are used locally for verification and never added to the HTTP body.
+    const proof = delivery.message ? { ...params, message: delivery.message } : params;
+    const attempt = await this.deliveryVerifier.prepare(action, proof, this.selfId,
+      (name, args, limit) => this.#callHttp(name, args, limit));
+    delivery.beforeSend?.(); // Recheck cancellation/permissions after the async snapshot.
+    try {
+      return await this.#callHttp(action, params, timeoutMs);
+    } catch (error) {
+      const receipt = await this.deliveryVerifier.recover(attempt);
+      if (!receipt) throw error;
+      console.warn(`[onebot] ${action} 返回失败，但已核实送达${receipt.message_id != null ? ` #${receipt.message_id}` : ''}；停止重发。原错误：${error.message}`);
+      return receipt;
+    }
+  }
+
+  async #callHttp(action, params = {}, timeoutMs = null) {
     assertProtectedAction(action, params);
     // ── 超时按 action 分档（这里修过一个真实故障）──────────────────────────
     // 原来一律 15 秒。查询类够用，但**发送类不够**：图片/视频以 base64 或大 body
@@ -307,12 +331,12 @@ export class OneBotClient {
   }
 
   /** 发送消息段。返回 OneBot 响应 data（含 message_id）。 */
-  async sendSegments(kind, id, segments) {
+  async sendSegments(kind, id, segments, delivery = {}) {
     const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
     const params = kind === 'private'
       ? { user_id: Number(id), message: segments }
       : { group_id: Number(id), message: segments };
-    return this.call(action, params);
+    return this.call(action, params, null, delivery);
   }
 
   /**
@@ -339,17 +363,18 @@ export class OneBotClient {
     return segments;
   }
 
-  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null } = {}) {
+  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'text', data: { text: escapeCqText(String(text ?? '')) } });
-    return this.sendSegments(kind, id, segments);
+    return this.sendSegments(kind, id, segments, { beforeSend });
   }
 
-  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null } = {}) {
+  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     // subType=1 请求协议端按"表情样式"渲染（小图气泡）；不支持该字段的实现会忽略它。
     segments.push({ type: 'image', data: { file: String(imageUrl), subType: 1 } });
-    return this.sendSegments(kind, id, segments);
+    const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend });
   }
 
   /**
@@ -363,12 +388,13 @@ export class OneBotClient {
    * 段结构与 sendSticker 完全一样（都是 image 段），区别只是语义：
    * 那个是"发表情"，这个是"发一张图"。所以复用同一套 reply/at 处理。
    */
-  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null } = {}) {
+  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null } = {}) {
     const ref = String(fileRef ?? '').trim();
     if (!ref) throw new Error('图片内容为空');
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'image', data: { file: ref } });
-    return this.sendSegments(kind, id, segments);
+    const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend });
   }
 
   async sendPoke(kind, id, targetUserId) {
