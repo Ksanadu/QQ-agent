@@ -197,6 +197,23 @@ export class Orchestrator {
    */
   onIncoming(chatKey, entry = null) {
     if (this.paused || this.aborted) return;
+    if (chatKey.startsWith('group:') && entry?.pureBotMention === true
+        && !entry.self && !entry.recalled && !entry.reply && !entry.isPoke && !(entry.media || []).length
+        && this.runningChats.has(chatKey)) {
+      const session = this.sessions.current.get(this.activeRuns.get(chatKey));
+      if (session?.status === 'running' && session.trigger?.some(m => String(m.senderId) === String(entry.senderId))) {
+        entry.nudgeForSessionId = session.id;
+        this.store.markEntryRead(chatKey, entry.id);
+        this.handledEntries.get(chatKey)?.add(entry.id);
+        this.listenerRelevant.get(chatKey)?.delete(entry.id);
+        session.nudges ||= [];
+        session.nudges.push({ localId: entry.id, messageId: entry.mid, senderId: entry.senderId, ts: entry.ts });
+        this.sessions.update(session.id);
+        this.emit('session-update', session.id);
+        this.emit('chat-update', chatKey);
+        return;
+      }
+    }
     if (getConfig().conversationListener?.enabled === false || commandMuteTier(chatKey) !== null) this.listeners.stop(chatKey);
     else if (entry && entry.atMe !== true) this.listeners.feed(chatKey, entry);
     // 运行中 / 倒计时中：消息保持未读（不判定、不重置），由会话结束的

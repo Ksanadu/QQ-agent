@@ -62,6 +62,15 @@ function describeCause(error, depth = 0) {
     || parts.join(' ← ') || '未知原因';
 }
 
+/** Only protocol @ segments targeting this bot, plus optional whitespace. */
+export function isPureBotMention(segments, selfId) {
+  const id = String(selfId || '');
+  return !!id && Array.isArray(segments)
+    && segments.some(s => s?.type === 'at' && String(s.data?.qq) === id)
+    && segments.every(s => (s?.type === 'at' && String(s.data?.qq) === id)
+      || (s?.type === 'text' && !String(s.data?.text ?? '').trim()));
+}
+
 export class OneBotClient {
   constructor({ wsUrl, httpUrl, accessToken, httpToken, onEvent }) {
     this.wsUrl = String(wsUrl || 'ws://127.0.0.1:3001');
