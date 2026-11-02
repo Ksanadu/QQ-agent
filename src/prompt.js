@@ -48,7 +48,7 @@ function collectSkillSections(context = {}) {
 
 /** 把 Skill 片段渲染成提示词块。 */
 function renderSkillSections(sections) {
-  const out=['','【按需速查】先 read_skill_guide(skillId)，同次运行可复用。路径：核心 doc/core-guides/<id>.md；技能 skills/<id>/QUICK_REFERENCE.md；插件 plugins/<id>/QUICK_REFERENCE.md。'];
+  const out=['','【按需速查】【！重要！】调用工具前必须先 read_skill_guide(skillId)，同次运行可复用。路径：核心 doc/core-guides/<id>.md；技能 skills/<id>/QUICK_REFERENCE.md；插件 plugins/<id>/QUICK_REFERENCE.md。'];
   for(const s of sections){
     if(s.isGuideIndex){
       const id=s.guideId||s.skillId;
