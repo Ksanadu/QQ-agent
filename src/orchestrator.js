@@ -254,7 +254,11 @@ export class Orchestrator {
 
     // 触发：进入固定的"等待中"倒计时（不重置）。verified 标记让 wake 知道
     // 这一批是"逐条判定出过触发消息"的，批边界可以信任等待会话的起点。
-    this.scheduleWake(chatKey, null, { verified: true });
+    // A standalone @ often precedes separately sent text/images. Reserve a
+    // fixed five-second batch without shortening a longer configured window.
+    const delay = chatKey.startsWith('group:') && entry?.pureBotMention === true
+      ? Math.max(5000, Number(cfg.wakeDelayMs) || 2000) : null;
+    this.scheduleWake(chatKey, delay, { verified: true });
   }
 
   /**
