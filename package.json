@@ -57,6 +57,7 @@
     "test:sticker": "node test/sticker-collect-test.mjs && node test/sticker-preview-test.mjs",
     "test:images": "node test/send-image-formats-test.mjs",
     "test:delivery": "node test/delivery-verification-test.mjs && node test/delivery-verification-e2e.mjs",
+    "test:meme-search": "node test/meme-search-migration-test.mjs",
     "test:msgid": "node test/message-id-test.mjs",
     "test:coverage": "node test/coverage-offline.mjs && node test/coverage-http.mjs && node test/coverage-e2e.mjs && node test/coverage-ui.mjs && node test/coverage-wiring.mjs",
     "test:all": "npm test && npm run test:coverage",

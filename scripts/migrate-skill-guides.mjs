@@ -5,15 +5,13 @@ const root=path.resolve(process.argv[2] || path.join(path.dirname(fileURLToPath(
 const when={
  'antigravity-image':'用户询问 API 生图用法、额度、参考图或状态时；实际生图仅由 /generate 命令触发',
  'bangumi-lookup':'查询番剧、动漫、角色、声优、评分、集数或放送进度时',
- 'bilibili':'查询或分享 B站视频、UP主、字幕、搜索结果或热榜时',
+ 'bilibili':'查询网络梗、新词、缩写的含义/出处，或查询分享 B站视频、UP主、字幕、搜索结果、热榜时',
  'comfy-draw':'用户询问本地生图用法或队列时；实际生图仅由 /comfy 命令触发',
  'cross-group-memory':'保存、回忆、整理、复习或删除跨群记忆，以及批量记住聊天记录时',
  'netease-music':'推荐歌曲/专辑、查询曲目、回应音乐分享或发送音乐卡片时',
  'sticker-librarian':'盘点、补备注/标签、整理或申请删除收藏表情时',
- 'trendy-memes':'遇到不确定的网络梗、新词、缩写，或解释、收录新梗时',
  'tts-say':'用户明确要求语音回复、朗读或语音转达时',
- 'favor':'查询或调整好感、情绪，或处理用户要求不被记录时',
- 'hot-trend-tracker':'查询后台热梗知识库的更新和状态时'
+ 'favor':'查询或调整好感、情绪，或处理用户要求不被记录时'
 };
 const summary=[];
 for(const base of ['skills','plugins'])for(const d of (fs.existsSync(path.join(root,base))?fs.readdirSync(path.join(root,base),{withFileTypes:true}):[]).filter(x=>x.isDirectory())){
