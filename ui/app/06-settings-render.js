@@ -879,7 +879,7 @@ return `
         </select>
         <div class="hint">内置落成各厂商思考参数（off~max 六档）；渠道不支持高档时向下就近映射。</div></div>
       <div class="field-row">
-        <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">等待期间，唤醒者的新消息重新计时，其他人的消息不延长窗口。纯 @ 与带正文的唤醒均使用此设置。</div></div>
+        <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">等待期间，唤醒者的新消息重新计时，其他人的消息不延长窗口。</div></div>
         <div class="field"><label>批次间隔（毫秒）</label><input type="number" id="sc-draindelay" min="0" value="${esc(c.drainDelayMs)}" /></div>
       </div>
       <div class="field-row">
