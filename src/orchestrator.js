@@ -10,7 +10,7 @@
 // 不同会话之间并行，受 maxConcurrentRuns 全局限流。
 import { getConfig, storeConfigForChat, personaForChat, commandMuteTier } from './config.js';
 import { chatAllowed } from './chat-policy.js';
-import { ConversationListeners } from './conversation-listener.js';
+import { ConversationListeners, normalizeListenerDelayMs } from './conversation-listener.js';
 import { vendorOfConfig } from './model-prices.js';
 import { randInt } from './util.js';
 import { buildSystemPrompt, buildUserPrompt, resolveContextTier } from './prompt.js';
@@ -52,6 +52,7 @@ export class Orchestrator {
     // 免得存档页长期挂着一片假"未读"。有会话触发/有新消息时一律取消。
     this.unreadFallbackTimers = new Map(); // chatKey -> timer
     this.pendingWake = new Set();      // 防抖中等待聚批的 chatKey
+    this.wakeWindows = new Map();     // chatKey -> { delay, actorIds }，只允许本次唤醒者续期
     this.pendingSessions = new Map();  // chatKey -> waiting sessionId（防抖期可见的“等待中”会话）
     this.verifiedWakes = new Set();    // 本轮 wake 由 onIncoming 触发判定排定的 chatKey（区别于 drain 等机械重排）
     this.consolidating = new Set();    // 正在整理记忆的 chatKey
@@ -187,13 +188,8 @@ export class Orchestrator {
    * 3 档：被@/关键词/命中概率；4 档：必定触发）：
    *   · 不触发 → 当场标已读（判定是纯本地计算，通常瞬间完成，
    *     表现为"未读一闪即已读"），消息沉入历史成为【已读信息】。
-   *   · 触发   → 该消息保持未读，进入"等待中"倒计时（固定时长，不被重置）。
-   *     倒计时内后续到达的消息**不再判定**，只入库置未读，到点后与触发消息
-   *     一起被 drain 成【未读信息】。
-   *
-   * 倒计时不重置、不重新判定是刻意设计：触发消息 X 的判定结果代表"这一批
-   * 的锚点"，窗口内追加判定会让"批的触发原因"随每条新消息漂移（reason
-   * 与 contextLimit 对不上账）。窗口只是聚批，不是判定窗口。
+   *   · 触发 → 保持未读，进入等待窗口；同一唤醒者续发重新计时，其他人只聚批。
+   * 批次的触发原因保持不变，续发消息无需重新判定；刷新复用同一个等待会话。
    */
   onIncoming(chatKey, entry = null) {
     if (this.paused || this.aborted) return;
@@ -216,10 +212,16 @@ export class Orchestrator {
     }
     if (getConfig().conversationListener?.enabled === false || commandMuteTier(chatKey) !== null) this.listeners.stop(chatKey);
     else if (entry && entry.atMe !== true) this.listeners.feed(chatKey, entry);
-    // 运行中 / 倒计时中：消息保持未读（不判定、不重置），由会话结束的
+    // 运行中 / 倒计时中：消息保持未读（不重新判定），由会话结束的
     // drain 路径补判定（见 wake 末尾的 drain 注释）。
     if (this.runningChats.has(chatKey)) return;
-    if (this.pendingWake.has(chatKey)) return;
+    if (this.pendingWake.has(chatKey)) {
+      const window = this.wakeWindows.get(chatKey);
+      if (entry && !entry.self && !entry.recalled && window?.actorIds.has(String(entry.senderId))) {
+        this.scheduleWake(chatKey, window.delay, { refresh: true });
+      }
+      return;
+    }
 
     const cfg = getConfig();
     // 前置条件（与 wake 的闸门同口径，在这里提前拦截可以少建一次定时器）：
@@ -252,31 +254,32 @@ export class Orchestrator {
       }
     }
 
-    // 触发：进入固定的"等待中"倒计时（不重置）。verified 标记让 wake 知道
+    // 触发：进入可由唤醒者续期的"等待中"倒计时。verified 标记让 wake 知道
     // 这一批是"逐条判定出过触发消息"的，批边界可以信任等待会话的起点。
     // A standalone @ often precedes separately sent text/images. Reserve a
-    // fixed five-second batch without shortening a longer configured window.
+    // five-second batch without shortening a longer configured window.
     const delay = chatKey.startsWith('group:') && entry?.pureBotMention === true
       ? Math.max(5000, Number(cfg.wakeDelayMs) || 2000) : null;
-    this.scheduleWake(chatKey, delay, { verified: true });
+    const actor = entry || this.store.peekUnread(chatKey, 1)?.[0];
+    this.scheduleWake(chatKey, delay, { verified: true, actorIds: actor ? [actor.senderId] : [] });
   }
 
   /**
-   * 进入"等待中"倒计时并到点唤醒（2026-09-25 重做）。
+   * 进入等待窗口，到点唤醒；只允许本次唤醒者的新消息刷新窗口。
    *
-   * 旧版是"防抖聚批"：窗口内每来一条消息就重置倒计时、重跑预判。
-   * 新版语义：
-   *   · 倒计时长度固定（wakeDelayMs），进入后不被任何因素重置；
-   *   · 窗口内新消息只入库（onIncoming 里 pendingWake 直接 return）；
-   *   · 除非手动中止（abortSession/abortAll）或全局暂停，倒计时必然走完 → wake。
+   * 刷新保留窗口时长、唤醒者集合、verified 标记和等待会话 ID；其他排队请求不重置。
    * reuseSessionId（原地重试）与 drainBacklogAfterResume（恢复积压）仍走本函数，
    * 但它们是"已确定要跑"的调用，直接排定时器即可。
    */
-  scheduleWake(chatKey, delay = null, { reuseSessionId = null, verified = false } = {}) {
+  scheduleWake(chatKey, delay = null, { reuseSessionId = null, verified = false, actorIds = [], refresh = false } = {}) {
     const ms = delay ?? Math.max(0, Number(getConfig().wakeDelayMs) || 2000);
-    // 不可重置：已在倒计时中就不动它（唯一例外是原地重试——它进来时
-    // pendingWake 一定没有该 chatKey，因为 runningChats 刚释放、旧定时器已到期）。
-    if (this.pendingWake.has(chatKey)) return;
+    // 只有 onIncoming 核对唤醒者后才传 refresh；常规重复排队仍忽略。
+    if (this.pendingWake.has(chatKey)) {
+      if (!refresh) return;
+      clearTimeout(this.wakeTimers.get(chatKey));
+    } else {
+      this.wakeWindows.set(chatKey, { delay: ms, actorIds: new Set(actorIds.filter(id => id != null).map(String)) });
+    }
     this.pendingWake.add(chatKey);
     // verified = 本轮 wake 由 onIncoming 的"触发判定"排定（区别于 drain/积压恢复
     // 等机械重排）。wake 里据此决定是信任等待会话的批边界，还是对未读补判定 ——
@@ -321,6 +324,8 @@ export class Orchestrator {
     }
 
     const timer = setTimeout(() => {
+      this.wakeTimers.delete(chatKey);
+      this.wakeWindows.delete(chatKey);
       this.pendingWake.delete(chatKey);
       const waitingId = this.pendingSessions.get(chatKey);
       this.pendingSessions.delete(chatKey);
@@ -708,8 +713,15 @@ export class Orchestrator {
     if (!this.aborted && !this.paused) {
       const unread = this.store.unreadCount(chatKey);
       if (unread > 0) {
-        const drainDelay = Math.max(200, Number(getConfig().drainDelayMs) || 1200);
-        this.scheduleWake(chatKey, drainDelay);
+        const related = (this.store.peekUnread(chatKey, 500) || []).filter(m => this.listenerRelevant.get(chatKey)?.has(m.id));
+        if (related.length) {
+          this.scheduleWake(chatKey, normalizeListenerDelayMs(getConfig().conversationListener?.wakeDelayMs, 200), {
+            verified: true, actorIds: related.map(m => m.senderId)
+          });
+        } else {
+          const drainDelay = Math.max(200, Number(getConfig().drainDelayMs) || 1200);
+          this.scheduleWake(chatKey, drainDelay);
+        }
       }
     }
 
@@ -1939,7 +1951,11 @@ export class Orchestrator {
     this.listenerRelevant.set(chatKey, approved);
     if (added) {
       this.emit('listener-forward', { chatKey, ids: [...approved], reason });
-      if (!this.runningChats.has(chatKey) && !this.pendingWake.has(chatKey)) this.scheduleWake(chatKey, 200, { verified: true });
+      if (!this.runningChats.has(chatKey) && !this.pendingWake.has(chatKey)) {
+        const actorIds = ids.map(localId => this.store.findByLocalId(chatKey, localId))
+          .filter(m => m && approved.has(m.id)).map(m => m.senderId);
+        this.scheduleWake(chatKey, normalizeListenerDelayMs(cfg.conversationListener?.wakeDelayMs, 200), { verified: true, actorIds });
+      }
     }
   }
 
@@ -1987,6 +2003,8 @@ export class Orchestrator {
         }
         this.#cancelUnreadFallback(chatKey);
         this.pendingWake.delete(chatKey);
+        this.wakeWindows.delete(chatKey);
+        this.verifiedWakes.delete(chatKey);
         this.pendingSessions.delete(chatKey);
         this.#discardWaiting(waitingId);
         return { ok: true };
@@ -2017,6 +2035,8 @@ export class Orchestrator {
     for (const timer of this.unreadFallbackTimers.values()) clearTimeout(timer);
     this.unreadFallbackTimers.clear();
     this.pendingWake.clear();
+    this.wakeWindows.clear();
+    this.verifiedWakes.clear();
     for (const sessionId of this.pendingSessions.values()) this.#finishWaiting(sessionId, 'aborted');
     this.pendingSessions.clear();
     this.stopProactiveLoop();

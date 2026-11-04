@@ -1,6 +1,6 @@
 // 触发链路语义回归（2026-09-25 重做后的核心承诺）：
 //   1. 逐条判定：不触发的消息入库瞬间标已读（"未读一闪即已读"）；
-//   2. 触发消息保持未读并进入固定倒计时；窗口内追加消息不判定、不重置倒计时；
+//   2. 触发消息保持未读并进入倒计时；同一唤醒者续发刷新，其他人不重置；
 //   3. 倒计时结束后触发批（触发消息 + 窗口内追加的）整体成为【未读信息】，
 //      之前已读的闲聊是【已读信息】——边界恰好落在"触发消息之前"；
 //   4. 4 档下任何消息必触发，聚批/边界语义与 1~3 档完全一致；
@@ -23,8 +23,14 @@ async function check(name, fn) {
   catch (e) { fail.push(name); console.error(`  ✗ ${name}\n      ${e.message}`); }
 }
 
+let replyIndex = 0;
+const reply = () => ({ toolCalls: [
+  { name: 'send_message', args: { messages: `已收到本批消息 ${++replyIndex}` } },
+  { name: 'finish', args: { summary: '已回复' } }
+] });
 const env = await bootApp({
-  config: { store: { contextSliderPos: 0, historyCount: 80 }, wakeDelayMs: 400 }
+  config: { store: { contextSliderPos: 0, historyCount: 80 }, wakeDelayMs: 400 },
+  script: Array.from({ length: 100 }, reply)
 });
 const { app, pushGroupMsg, llm, request } = env;
 const unread = () => app.store.getChatMeta('group:456').unread;
@@ -41,14 +47,14 @@ await check('A1 不触发的闲聊：当场标已读（零等待、零 LLM）', 
   assert.equal(llmCount(), before, '不应产生 LLM 调用');
 });
 
-await check('A2 触发消息（@）：保持未读进倒计时；窗口内追加消息不判定不重置', async () => {
+await check('A2 触发消息（@）：保持未读进倒计时；窗口内其他人的消息不判定不重置', async () => {
   pushGroupMsg(111, '张三', '@覆盖Bot 在吗', 9002);
   await sleep(80);
   assert.equal(unread(), 1, '触发消息应保持未读');
   pushGroupMsg(112, '李四', '我也插一句闲聊', 9003);
   await sleep(80);
   assert.equal(unread(), 2, '窗口内追加的消息应保持未读（不判定）');
-  // 倒计时不可重置：追加消息不重置。触发后 ~500ms（400 窗口 + 余量）时
+  // 非唤醒者追加消息不重置倒计时。触发后 ~500ms（400 窗口 + 余量）时
   // LLM 应已收到请求；若被重置（400ms 从追加起算），此刻必然还没到。
   await sleep(500 - 160);
   assert.ok(llmCount() >= 1, `倒计时不应被追加消息重置（期望已发起 LLM 请求，实际 ${llmCount()}）`);
@@ -143,11 +149,10 @@ await settle();
 // 【已读信息】为空、白烧 LLM。修复：drain 进 wake 时对未读逐条补判定。
 // 时序要点：必须在会话**还在跑**时塞消息（模拟运行期到达）。
 // ⚠️ mock 的 script 按**全局请求序号**索引，前面场景已消耗若干个 step，
-// 想让本轮响应慢，必须把整段 script 尾部都填上 delay。
+// 想让本轮响应慢，按下一次请求序号设置延迟；正常完成必须成功发送文字。
 await request('POST', '/api/config', { body: { store: { contextSliderPos: 0 } } });   // 切回 1 档（B 场景切过 4 档）
 await check('E1 运行期间的闲聊：会话结束后补判定不触发 → 标已读、不建新会话', async () => {
-  // 让接下来的若干轮响应都慢（800ms），确保塞消息时会话仍在运行
-  for (let i = 0; i < 6; i++) llm.state.script.push({ content: '（慢速响应）', delayMs: 800 });
+  llm.state.script[llmCount()] = { ...reply(), delayMs: 800 };
   const before = llmCount();
   pushGroupMsg(111, '张三', '@覆盖Bot E1批', 32500);
   await waitFor(() => llmCount() > before, 8000, 'E1 触发');
@@ -169,7 +174,7 @@ await check('E1 运行期间的闲聊：会话结束后补判定不触发 → �
 });
 
 await check('E2 运行期间的 @：会话结束后补判定触发 → 从 @ 消息起组批', async () => {
-  for (let i = 0; i < 6; i++) llm.state.script.push({ content: '（慢速响应）', delayMs: 800 });
+  llm.state.script[llmCount()] = { ...reply(), delayMs: 800 };
   const before = llmCount();
   pushGroupMsg(111, '张三', '@覆盖Bot E2批', 33900);
   await waitFor(() => llmCount() > before, 8000, 'E2 触发');

@@ -70,20 +70,7 @@ function renderSettingsSidebar() {
     </div>
     <div class="settings-menu">
       ${menu.map(([id, label]) => `<button class="settings-menu-item ${state.settingsSection === id ? 'active' : ''}" data-section="${id}">${label}${id === 'desktop' && (typeof updateAvailable !== 'undefined' && updateAvailable) ? '<span class="update-dot" title="发现新版本"></span>' : ''}</button>`).join('')}
-      <button class="settings-menu-item egg-hot" id="qrcode-egg-btn">！？群群？！</button>
     </div>`;
-  // 群二维码彩蛋：点一下弹出，再点屏幕任意位置关闭
-  // 图片 onerror 兜底：group-qrcode.jpg 正常随 ui/ 分发，
-  // 万一分发包缺了这张图，显示一句说明而不是一个裂图图标。
-  sidebar.querySelector('#qrcode-egg-btn')?.addEventListener('click', () => {
-    const ov = document.createElement('div');
-    ov.className = 'qrcode-egg-overlay';
-    ov.innerHTML = '<img src="group-qrcode.jpg" alt="群二维码" '
-      + 'onerror="this.remove(); this.parentElement?.insertAdjacentText(\'afterbegin\', \'二维码图片缺失：请把 group-qrcode.jpg 放到 ui/ 目录下\')" />';
-    const close = () => closeAnimatedOverlay(ov);
-    ov.addEventListener('click', close);
-    document.body.appendChild(ov);
-  });
   sidebar.querySelectorAll('.settings-menu-item').forEach((el) => {
     el.addEventListener('click', () => {
       // 切区块 = 整页表单重建：先把防抖窗口内挂起的保存发出，
@@ -892,7 +879,7 @@ return `
         </select>
         <div class="hint">内置落成各厂商思考参数（off~max 六档）；渠道不支持高档时向下就近映射。</div></div>
       <div class="field-row">
-        <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /></div>
+        <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">等待期间，唤醒者的新消息重新计时，其他人的消息不延长窗口。纯 @ 首次唤醒至少等待 5 秒，续发沿用该时长。</div></div>
         <div class="field"><label>批次间隔（毫秒）</label><input type="number" id="sc-draindelay" min="0" value="${esc(c.drainDelayMs)}" /></div>
       </div>
       <div class="field-row">
@@ -934,13 +921,21 @@ return `
       id: 'card-conversation-listener',
       icon: '👂',
       title: '独立关联监听',
-      sub: '免 @ 接续对话 / 监听时长',
+      sub: '免 @ 接续对话 / 监听时长与聚批',
       body: `
       <div class="field"><label for="cfg-listener-seconds">监听持续时间（秒）</label>
         <input type="number" id="cfg-listener-seconds" min="1" max="3600" step="1" value="${esc(Math.min(3600, Math.max(1, Math.round((Number(c.conversationListener?.idleMs) || 60000) / 1000))))}" />
         <div class="hint">可设置 1～3600 秒，默认 60 秒。相关对话会重新计时，无关消息不续期；持续无相关对话后结束监听。</div>
       </div>
-      <div class="hint">自动保存，对新开启的监听生效。</div>`
+      <div class="field"><label for="cfg-listener-batch-ms">判定前聚批（毫秒）</label>
+        <input type="number" id="cfg-listener-batch-ms" min="0" max="60000" step="100" value="${esc(c.conversationListener?.batchDelayMs ?? 400)}" />
+        <div class="hint">默认 400ms，范围 0～60000ms。收集新消息后交给 LLM 判断；窗口内新消息不会重新计时。</div>
+      </div>
+      <div class="field"><label for="cfg-listener-wake-ms">判定后延迟唤醒（毫秒）</label>
+        <input type="number" id="cfg-listener-wake-ms" min="0" max="60000" step="100" value="${esc(c.conversationListener?.wakeDelayMs ?? 200)}" />
+        <div class="hint">默认 200ms，范围 0～60000ms。判定相关后等待主会话；本次判定的唤醒者续发消息会重新计时，其他人的消息不延长窗口。</div>
+      </div>
+      <div class="hint">自动保存。监听时长和判定前聚批对新监听生效；判定后延迟对新等待窗口生效。</div>`
     })}
 
     ${fold({

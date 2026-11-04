@@ -14,7 +14,8 @@ export class ConversationListeners {
     idleMs = normalizeListenerIdleMs(idleMs);
     this.stop(chatKey, '新会话接管监听');
     const until = Date.now() + idleMs;
-    const worker = new Worker(new URL('./conversation-listener-worker.js', import.meta.url), { workerData: { config, anchor: anchor.map(listenerMessage), idleMs, until } });
+    const batchDelayMs = normalizeListenerDelayMs(config.conversationListener?.batchDelayMs, 400);
+    const worker = new Worker(new URL('./conversation-listener-worker.js', import.meta.url), { workerData: { config, anchor: anchor.map(listenerMessage), idleMs, until, batchDelayMs } });
     const state = { worker, parentSessionId, until, checked: 0, seen: new Set() };
     this.tasks.set(chatKey, state);
     const close = reason => {
@@ -54,4 +55,10 @@ export class ConversationListeners {
 export function normalizeListenerIdleMs(value) {
   const ms = Number(value);
   return Number.isFinite(ms) && ms > 0 ? Math.min(3600000, Math.max(1000, Math.round(ms))) : 60000;
+}
+
+export function normalizeListenerDelayMs(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const ms = Number(value);
+  return Number.isFinite(ms) ? Math.min(60000, Math.max(0, Math.round(ms))) : fallback;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { bootApp, waitFor, sleep } from './_harness.mjs';
-const env = await bootApp({ config: { wakeDelayMs: 30, store: { contextSliderPos: 10, peakSchedule: { enabled: false } }, conversationListener: { enabled: true, idleMs: 6000 } }, script: [
+const env = await bootApp({ config: { wakeDelayMs: 30, store: { contextSliderPos: 10, peakSchedule: { enabled: false } }, conversationListener: { enabled: true, idleMs: 6000, wakeDelayMs: 700 } }, script: [
   { delayMs: 1400, toolCalls: [{ name: 'send_message', args: { messages: '第一问的回答' } }, { name: 'finish', args: { summary: '已回复' } }] },
   { content: JSON.stringify({ related: true, ids: [2], reason: '对刚才的请求补充要求' }) },
   { toolCalls: [{ name: 'send_message', args: { messages: '补充要求的回答' } }, { name: 'finish', args: { summary: '已跟进' } }] },
@@ -14,6 +14,10 @@ try {
   await waitFor(() => llm.state.requests.length === 2);
   assert.equal(app.orchestrator.runningChats.size, 1);
   assert.equal(app.orchestrator.pendingWake.size, 0, 'related handoff waits for active main run');
+  await waitFor(() => app.orchestrator.pendingSessions.has('group:456'));
+  const waitingId = app.orchestrator.pendingSessions.get('group:456');
+  assert.ok(app.sessions.get(waitingId).waitUntil - Date.now() > 500, 'busy main handoff must also use configured listener delay');
+  assert.ok(app.orchestrator.wakeWindows.get('group:456').actorIds.has('777'));
   await waitFor(() => env.onebotHttp.state.sends.length === 2);
   await waitFor(() => app.orchestrator.runningChats.size === 0);
   assert.equal(llm.state.requests.length, 3, 'one classifier and exactly two main replies');

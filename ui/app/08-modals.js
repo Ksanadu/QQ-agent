@@ -1464,9 +1464,16 @@ async function saveConfig({ quiet = false } = {}) {
       encourage: Math.min(3, Math.max(0, Number(val('#cfg-sticker-encourage', c.sticker?.encourage ?? 1)) || 0)),
       promptMaxStickers: Math.min(50, Math.max(1, Number(val('#cfg-sticker-promptmax', c.sticker?.promptMaxStickers ?? 10)) || 10))
     };
+    const listenerDelay = (selector, current, fallback) => {
+      const raw = val(selector, current ?? fallback);
+      const n = Number(raw);
+      return raw === '' || !Number.isFinite(n) ? fallback : Math.min(60000, Math.max(0, Math.round(n)));
+    };
     patch.conversationListener = {
       ...(c.conversationListener || {}),
-      idleMs: Math.min(3600, Math.max(1, Math.round(Number(val('#cfg-listener-seconds', (c.conversationListener?.idleMs ?? 60000) / 1000)) || 60))) * 1000
+      idleMs: Math.min(3600, Math.max(1, Math.round(Number(val('#cfg-listener-seconds', (c.conversationListener?.idleMs ?? 60000) / 1000)) || 60))) * 1000,
+      batchDelayMs: listenerDelay('#cfg-listener-batch-ms', c.conversationListener?.batchDelayMs, 400),
+      wakeDelayMs: listenerDelay('#cfg-listener-wake-ms', c.conversationListener?.wakeDelayMs, 200)
     };
     // 指令禁言（独立折叠卡「指令禁言」，与其他聊天设置一样即时自动保存）
     patch.commandMute = {

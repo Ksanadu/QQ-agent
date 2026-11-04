@@ -41,7 +41,7 @@ async function check() {
     if (!closed) parentPort.postMessage({ type: 'check', related: false, ids: [], reason: '关联判断暂不可用', error: String(e.message).slice(0, 200), until });
   } finally {
     clearTimeout(timeout); running = false;
-    if (!closed && queue.length) debounce = setTimeout(() => { debounce = null; check(); }, 400);
+    if (!closed && queue.length) debounce = setTimeout(() => { debounce = null; check(); }, workerData.batchDelayMs);
   }
 }
 parentPort.on('message', event => {
@@ -51,7 +51,7 @@ parentPort.on('message', event => {
   if (event.type === 'entry') {
     if (!queue.some(m => m.id === event.entry.id)) queue.push(event.entry);
     queue = queue.slice(-60);
-    if (!debounce && !running) debounce = setTimeout(() => { debounce = null; check(); }, 400);
+    if (!debounce && !running) debounce = setTimeout(() => { debounce = null; check(); }, workerData.batchDelayMs);
   }
 });
 arm();

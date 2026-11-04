@@ -18,14 +18,15 @@ try {
   pushGroupMsg(777,'甲','这张图评价一下',503);
   pure(504);
   await waitFor(()=>app.store.findByMid('group:456',504));
-  assert.equal(app.sessions.get(id).waitUntil,until,'supplements must not restart or extend the fixed window');
-  await waitFor(()=>llm.state.requests.length===1,4000);await idle();await sleep(700);
+  assert.ok(app.sessions.get(id).waitUntil > until + 2500,'same actor supplements restart the five-second window');
+  assert.equal(app.orchestrator.pendingSessions.get('group:456'),id,'refresh must reuse the waiting session');
+  await waitFor(()=>llm.state.requests.length===1,7000);await idle();await sleep(700);
   const session=app.sessions.get(id);
   assert.deepEqual(session.trigger.map(m=>m.mid).sort(),[501,502,503,504]);
   assert.equal(session.trigger.find(m=>m.mid===502).media[0].kind,'image');
   assert.equal(llm.state.requests.length,1,'the whole batch must produce only one main call and no listener follow-up');
   assert.equal(env.onebotHttp.state.sends.length,1);
-  console.log('PASS first pure @ waits five seconds; image/text three seconds later join one batch; repeated @ does not extend it');
+  console.log('PASS first pure @ waits five seconds; same actor image/text/@ refresh one waiting batch');
 
   llm.state.script[1]=reply('正常文字请求');
   pushGroupMsg(777,'甲','@覆盖Bot 有正文的新问题',510);

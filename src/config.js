@@ -372,7 +372,7 @@ export const DEFAULT_CONFIG = {
     hotReload: true
   },
   // 被触发后开启独立 LLM 监听；仅相关消息可免 @ 继续，闲置达到配置时长后退出。
-  conversationListener: { enabled: true, idleMs: 60000 },
+  conversationListener: { enabled: true, idleMs: 60000, batchDelayMs: 400, wakeDelayMs: 200 },
   // 桌面端/控制台
   server: {
     // 端口：QQ_AGENT_PORT 显式覆盖 > 默认 3210 + PROFILE 偏移

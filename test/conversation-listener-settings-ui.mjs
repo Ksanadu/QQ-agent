@@ -25,12 +25,28 @@ try {
   show();
   assert.match(window.$('#card-conversation-listener').textContent,/独立关联监听/);
   assert.equal(window.$('#cfg-listener-seconds').value,'45');
+  assert.equal(window.$('#cfg-listener-batch-ms').value,'400');
+  assert.equal(window.$('#cfg-listener-wake-ms').value,'200');
+  window.$('#cfg-listener-batch-ms').value='1200';
+  window.$('#cfg-listener-wake-ms').value='2400';
   window.$('#cfg-listener-seconds').value='180';
   await window.saveConfig({quiet:true});
   const saved=JSON.parse(fs.readFileSync(path.join(process.env.QQ_AGENT_DATA_DIR,'config.json'),'utf8'));
   assert.equal(saved.conversationListener.idleMs,180000);
+  assert.equal(saved.conversationListener.batchDelayMs,1200);
+  assert.equal(saved.conversationListener.wakeDelayMs,2400);
   assert.equal(saved.conversationListener.enabled,false,'changing duration must preserve the existing enable switch');
   show();assert.equal(window.$('#cfg-listener-seconds').value,'180','saved duration must survive a re-render');
+  assert.equal(window.$('#cfg-listener-batch-ms').value,'1200');
+  assert.equal(window.$('#cfg-listener-wake-ms').value,'2400');
+  for(const [input,batch,wake] of [['',400,200],['0',0,0],['-5',0,0],['99999',60000,60000]]){
+    window.$('#cfg-listener-batch-ms').value=input;
+    window.$('#cfg-listener-wake-ms').value=input;
+    await window.saveConfig({quiet:true});
+    assert.equal(window.state.config.conversationListener.batchDelayMs,batch);
+    assert.equal(window.state.config.conversationListener.wakeDelayMs,wake);
+  }
+  assert.ok(!render.includes('qrcode-egg'),'settings must not render or bind the group promotion');
   for(const [input,expected] of [['',60000],['-5',1000],['5000',3600000]]){
     window.$('#cfg-listener-seconds').value=input;
     await window.saveConfig({quiet:true});
