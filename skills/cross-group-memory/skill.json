@@ -1,0 +1,175 @@
+{
+  "id": "cross-group-memory",
+  "name": "跨群记忆",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "description": "在群里聊天时自动认出谁在说话（从消息存档取 QQ 号与昵称），把最近的对话内容与大致印象记进长期记忆；（2026-10-09 起并入原 chatlog-memory 的「粘贴记录批量入库」能力，两条路径共用同一套印象/信息分流）并建立一份跨群索引，让机器人在 B 群也能知道「这个人在 A 群也来过」。支持按 QQ 号查询某人的印象与标签、删除某人的全部记录。写入前会过滤敏感个人信息（真名、住址、电话、身份证、病史、财务等）—— 这类内容一律不落库。所有数据都存在宿主自带的记忆系统里，可在控制台记忆页查看与删除。\n\n【记忆衰减 · 2026-10-09 新增】记忆分两类处理：\n· 印象（这个人是什么样：性格/偏好/雷点/常聊话题）—— 永不遗忘。\n· 信息（发生过什么事：一次性的、有时效的）—— 按半衰期衰减，默认 14 天留存减半；被再次提到（复习）则延长。\n衰减只降级不删除：活跃 → 淡化 → 归档；归档的信息不再主动喂给模型，但仍能被检索到。\n「淡化区」里同主题的多条信息会被定期蒸馏成一条稳定的印象（提纯，不是缩短）—— 这就是「记住关键信息」。\n信息侧存于 data/memory-curve/（宿主 schema 放不下 hits/时间戳，故独立存放）；整体删除该目录即可无损回退。",
+  "author": "伊西丝 / WorkBuddy",
+  "entry": "index.js",
+  "enabledByDefault": false,
+  "capabilities": [],
+  "requires": [],
+  "permissions": [],
+  "settings": {
+    "autoRecord": true,
+    "crossGroup": true,
+    "maxImpressionsPerMember": 12,
+    "minMessages": 3,
+    "recentMessageLimit": 60,
+    "maxSummaryChars": 240,
+    "filterSensitive": true,
+    "recordNickname": true,
+    "lookupMembers": true,
+    "memoryDecay": true,
+    "factHalfLifeDays": 14,
+    "archiveThreshold": 0.15,
+    "fadeThreshold": 0.5,
+    "reviewBoost": 0.3,
+    "injectMemory": true,
+    "injectMaxFacts": 6,
+    "distillIntervalHours": 24,
+    "distillMinFacts": 3,
+    "maxFactsPerMember": 40
+  },
+  "configSchema": {
+    "autoRecord": {
+      "type": "boolean",
+      "label": "自动记录本群印象",
+      "description": "开启后，机器人可以在对话中主动调用 record 工具，把最近聊过的人和话题记下来。关闭后只能手动调用，不会自动写任何东西。默认开启。"
+    },
+    "crossGroup": {
+      "type": "boolean",
+      "label": "允许跨群共享",
+      "description": "开启后建立跨群索引：同一 QQ 号在哪些群出现过、各群分别关注什么话题。这样在 B 群也能认出 A 群见过的人。关闭则每个群的记忆完全隔离（更保守）。默认开启。"
+    },
+    "maxImpressionsPerMember": {
+      "type": "number",
+      "label": "每人最多保留印象条数",
+      "description": "超过这个数量时保留最近的若干条，其余被舍弃。默认 12。调大记性更好但记忆库增长更快。",
+      "min": 3,
+      "max": 50,
+      "step": 1
+    },
+    "minMessages": {
+      "type": "number",
+      "label": "至少发言几条才记",
+      "description": "某人在最近消息里发言少于这个条数就不记 —— 避免把偶尔冒泡的人写成印象。默认 3。",
+      "min": 1,
+      "max": 20,
+      "step": 1
+    },
+    "recentMessageLimit": {
+      "type": "number",
+      "label": "回看多少条消息",
+      "description": "记录时读取最近的多少条消息做依据。默认 60。调大看得更全但更慢；避免设得过大（消息太多会稀释重点）。",
+      "min": 10,
+      "max": 200,
+      "step": 10
+    },
+    "maxSummaryChars": {
+      "type": "number",
+      "label": "单条摘要最长字数",
+      "description": "每条印象摘要的字数上限，默认 240。宿主底层会硬切到 300 字且不报错，所以这里必须留出余量。",
+      "min": 40,
+      "max": 280,
+      "step": 10
+    },
+    "filterSensitive": {
+      "type": "boolean",
+      "label": "过滤敏感个人信息",
+      "description": "开启后自动拦截真名、住址、手机号、身份证、银行卡、病历等敏感内容，不写入记忆。建议保持开启 —— 记忆库是长期存储，这类内容一旦落库很难彻底清干净。默认开启。"
+    },
+    "recordNickname": {
+      "type": "boolean",
+      "label": "记录昵称",
+      "description": "把群昵称一并存下来，便于以后用名字称呼。关闭则只存 QQ 号。默认开启。"
+    },
+    "lookupMembers": {
+      "type": "boolean",
+      "label": "查群成员补 QQ 号",
+      "description": "粘贴聊天记录入库时，记录里只写了名字的，去查群成员表把 QQ 号补上。只在唯一命中时才补：重名时宁可不补 —— 把印象记到别人头上比缺少号码糟糕得多（记忆是长期的）。关掉后一律按名字存。默认开启。"
+    },
+    "memoryDecay": {
+      "type": "boolean",
+      "label": "启用记忆衰减",
+      "description": "开启后，「信息」类记忆会随时间淡忘（印象不受影响）：活跃 → 淡化 → 归档，且定期把淡化的信息蒸馏成稳定印象。关闭则退回到旧行为（所有内容按印象存、永不遗忘）。默认开启。"
+    },
+    "factHalfLifeDays": {
+      "type": "number",
+      "label": "信息半衰期（天）",
+      "description": "一条「信息」在不再被提到的条件下，留存度降到一半所需的天数。默认 14 天。调大记性更久，调小忘得更快。",
+      "min": 1,
+      "max": 365,
+      "step": 1
+    },
+    "archiveThreshold": {
+      "type": "number",
+      "label": "归档阈值",
+      "description": "留存度低于此值的信息进入「归档」：不再主动喂给模型，但**数据不删**、仍可被检索。默认 0.15。",
+      "min": 0,
+      "max": 0.9,
+      "step": 0.01
+    },
+    "fadeThreshold": {
+      "type": "number",
+      "label": "淡化阈值",
+      "description": "留存度低于此值进入「淡化」：不再强调，并且是蒸馏的首选目标（同主题多条会被归纳成一条印象）。默认 0.5。必须大于归档阈值。",
+      "min": 0.01,
+      "max": 1,
+      "step": 0.01
+    },
+    "reviewBoost": {
+      "type": "number",
+      "label": "复习加成",
+      "description": "某条信息被再次提到（复习）时的留存加成系数。用对数递增：第 1 次复习收益最大，之后递减。默认 0.3。设 0 = 复习不延长记忆。",
+      "min": 0,
+      "max": 2,
+      "step": 0.05
+    },
+    "injectMemory": {
+      "type": "boolean",
+      "label": "把记忆注入对话",
+      "description": "开启后，每次对话会把当前群友「活跃区」的近况摘要喂给模型（归档区不喂），让它自然地体现出记得这些人。关闭则只保留查询能力、不主动注入。默认开启。"
+    },
+    "injectMaxFacts": {
+      "type": "number",
+      "label": "注入条数上限",
+      "description": "每次注入的群友近况总条数参考上限（会按人数分摊）。调大提示词更长、更费 token。默认 6。",
+      "min": 1,
+      "max": 30,
+      "step": 1
+    },
+    "distillIntervalHours": {
+      "type": "number",
+      "label": "蒸馏间隔（小时）",
+      "description": "距上次蒸馏超过这个时间才会再次触发（在会话结束时检查）。蒸馏要调用模型归纳，间隔太短会白烧 token。默认 24 小时。",
+      "min": 1,
+      "max": 720,
+      "step": 1
+    },
+    "distillMinFacts": {
+      "type": "number",
+      "label": "蒸馏最少条数",
+      "description": "同一主题至少累积多少条淡化信息才值得蒸馏。一条事实谈不上「归纳」。默认 3。",
+      "min": 2,
+      "max": 10,
+      "step": 1
+    },
+    "maxFactsPerMember": {
+      "type": "number",
+      "label": "每人信息条数上限",
+      "description": "单人在侧存里的信息条数硬上限，超出时**只裁最淡的归档项**（绝不碰还能想起来的）。默认 40。",
+      "min": 5,
+      "max": 200,
+      "step": 5
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "保存、回忆、整理、复习或删除跨群记忆，以及批量记住聊天记录时",
+      "priority": 58
+    }
+  }
+}

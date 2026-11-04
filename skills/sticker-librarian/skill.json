@@ -1,0 +1,48 @@
+{
+  "id": "sticker-librarian",
+  "name": "表情库管家",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "utility",
+  "description": "让机器人自己管理表情库：一句话就能查清家底（总共多少张、哪些没备注、哪些是重复的），按用途给表情补标签分类（怼人/卖萌/打招呼…），并把过期、不合适、重复的表情从 QQ 收藏里真正删掉。删除前必定先列清单让你确认，不会先斩后奏。",
+  "author": "QQ Agent",
+  "entry": "index.js",
+  "enabledByDefault": true,
+  "capabilities": [],
+  "requires": [],
+  "settings": {
+    "enabled": true,
+    "maxAuditList": 120,
+    "unlabeledSample": 10,
+    "maxDeletePerCall": 20
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用表情库管家",
+      "description": "关掉后机器人不再拥有「盘点表情库」和「删除表情」这两个能力，聊天与发表情不受影响。"
+    },
+    "maxDeletePerCall": {
+      "type": "number",
+      "label": "单次最多删除几张",
+      "description": "防止模型一次删掉一大片。默认 20 张；超过这个数量的删除请求会被拒绝，需要分几次或让用户自己复核。"
+    },
+    "maxAuditList": {
+      "type": "number",
+      "label": "盘点时最多列出几张",
+      "description": "回答「我表情库里都有什么」时，最多把多少张表情的清单给模型看（按使用次数排序）。默认 120。"
+    },
+    "unlabeledSample": {
+      "type": "number",
+      "label": "盘点时抽查几张没备注的",
+      "description": "把最多这么多张「没有备注」的表情附在盘点结果里，模型可以顺手看图认一认、补上含义。默认 10 张。"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "盘点、补备注/标签、整理或申请删除收藏表情时",
+      "priority": 45
+    }
+  }
+}

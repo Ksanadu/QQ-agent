@@ -1,0 +1,171 @@
+{
+  "id": "tts-say",
+  "name": "语音回复",
+  "version": "1.3.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "用户要求发语音时，按文字内容自动切换普通话 Kokoro 与粤语 VITS。CPU 离线推理、免 key；也可手动选择 Windows SAPI。",
+  "author": "QQ Agent 用户",
+  "enabledByDefault": true,
+  "settings": {
+    "engine": "kokoro",
+    "voice": "Microsoft Huihui Desktop",
+    "neuralVoice": "zf_001",
+    "neuralThreads": 2,
+    "neuralPython": "",
+    "neuralModelDir": "",
+    "languageMode": "auto",
+    "cantoneseModelDir": "",
+    "rate": 0,
+    "volume": 100,
+    "maxChars": 300,
+    "maxSeconds": 60,
+    "cooldownSec": 60,
+    "delivery": "record",
+    "triggerKeywords": "发语音,说语音,语音回复,用语音,念一下,读出来,发个语音,语音说,发条语音,能语音吗,發語音,語音回覆,用語音,讀出嚟,读出嚟,講語音,讲语音,發條語音,讀出來",
+    "crossEnabled": false,
+    "crossKeywords": "发给,发到,转告,告诉,私聊,语音发给,发语音给,帮我转告,替我告诉",
+    "crossMaxPerRun": 2,
+    "crossCooldownSec": 300,
+    "dryRun": true
+  },
+  "configSchema": {
+    "engine": {
+      "type": "enum",
+      "values": [
+        "kokoro",
+        "sapi"
+      ],
+      "label": "本地语音引擎",
+      "description": "kokoro = 本地双语神经语音：普通话 Kokoro、粤语 VITS；sapi = Windows 系统语音。均不联网，合成失败时不自动换引擎。"
+    },
+    "languageMode": {
+      "type": "enum",
+      "values": [
+        "auto",
+        "zh",
+        "yue"
+      ],
+      "label": "语音语言",
+      "description": "auto = 按本轮要求及朗读文字判断粤语/普通话；zh = 默认普通话；yue = 默认粤语。工具也可明确指定语言。"
+    },
+    "cantoneseModelDir": {
+      "type": "string",
+      "label": "粤语 VITS 模型目录",
+      "description": "留空使用 data/tts-neural/vits-cantonese-hf-xiaomaiiwn。模型须提前下载；与 Kokoro 共用 Python 环境和 CPU 线程设置。"
+    },
+    "neuralVoice": {
+      "type": "enum",
+      "values": [
+        "zf_001",
+        "zf_002",
+        "zf_003",
+        "zf_004",
+        "zf_005",
+        "zf_006",
+        "zf_007",
+        "zf_008"
+      ],
+      "label": "Kokoro 中文女声",
+      "description": "仅 Kokoro 引擎生效。这些是开源模型的本地音色，不是微软原版晓伊。"
+    },
+    "neuralThreads": {
+      "type": "number",
+      "label": "CPU 推理线程",
+      "description": "1 ~ 4，默认 2。不使用 GPU 显存。"
+    },
+    "neuralPython": {
+      "type": "string",
+      "label": "本地 Python 路径",
+      "description": "留空使用 data/tts-neural/.venv/Scripts/python.exe；必须已安装 sherpa-onnx 和 soundfile。"
+    },
+    "neuralModelDir": {
+      "type": "string",
+      "label": "Kokoro 模型目录",
+      "description": "留空使用 data/tts-neural/kokoro-multi-lang-v1_1。模型必须已下载，不会自动联网获取。"
+    },
+    "voice": {
+      "type": "enum",
+      "values": [
+        "Microsoft Huihui Desktop",
+        "Microsoft Zira Desktop",
+        "Microsoft Huihui",
+        "Microsoft Kangkang",
+        "Microsoft Yaoyao"
+      ],
+      "label": "Windows SAPI 音色",
+      "description": "仅 SAPI 引擎生效；可通过列出音色工具核对本机可用名称。"
+    },
+    "rate": {
+      "type": "number",
+      "label": "语速",
+      "description": "-10 ~ 10，0 是正常。越大越快。时长估算会跟着它变。默认 0。"
+    },
+    "volume": {
+      "type": "number",
+      "label": "音量",
+      "description": "0 ~ 100，默认 100。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单条字数上限",
+      "description": "超过就截断（优先在标点处断开），并告诉模型已经截断。默认 300。"
+    },
+    "maxSeconds": {
+      "type": "number",
+      "label": "单条时长上限（秒）",
+      "description": "按字数和语速估算，超过同样截断。默认 60。"
+    },
+    "cooldownSec": {
+      "type": "number",
+      "label": "冷却（秒）",
+      "description": "同一会话两次语音的最小间隔，防止连发刷屏。默认 60，填 0 = 不冷却。"
+    },
+    "delivery": {
+      "type": "enum",
+      "values": [
+        "record",
+        "file"
+      ],
+      "label": "投递方式",
+      "description": "record = 发成语音气泡（已实测可用）；file = 当普通文件发（气泡样式不行时的兜底）。默认 record。"
+    },
+    "triggerKeywords": {
+      "type": "string",
+      "label": "触发关键词",
+      "description": "本轮消息里出现这些词才切语音回复（逗号/顿号/空格分隔）。只匹配【未读信息】= 本轮新消息，历史里提过不算。留空 = 恢复默认词表。"
+    },
+    "dryRun": {
+      "type": "boolean",
+      "label": "演练模式",
+      "description": "开着时照常合成，但**不发送**（只在会话卡片里告诉你合成了多少字、几秒）。首次配置音色时保持开启，确认没问题再关。默认开启。"
+    },
+    "crossEnabled": {
+      "type": "boolean",
+      "label": "跨会话语音（转达给别人）",
+      "description": "开启后，有人说「用语音发给XX / 转告XX」时，可以把语音发到**别的**群或私聊。需要两个开关同时打开：本项 + 设置 → 工具与技能的「允许跨会话发送」。目标仍必须在白名单内。**默认关闭**，建议先演练模式验证再放开。"
+    },
+    "crossKeywords": {
+      "type": "string",
+      "label": "转达关键词",
+      "description": "本轮消息里出现这些词、**并且**同时出现语音关键词，才会走跨会话（宁可少发，也绝不把语音误发给别人）。留空 = 恢复默认词表。"
+    },
+    "crossMaxPerRun": {
+      "type": "number",
+      "label": "单轮跨会话上限",
+      "description": "一次会话里最多发几条跨会话语音，防止一轮连发骚扰别人。默认 2，填 0 = 本轮完全禁止跨会话。"
+    },
+    "crossCooldownSec": {
+      "type": "number",
+      "label": "跨会话冷却（秒）",
+      "description": "同一个目标两次语音之间的最小间隔（按目标各自计时，跨会话之间不共享配额）。默认 300 秒。"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "用户明确要求语音回复、朗读或语音转达时",
+      "priority": 1
+    }
+  }
+}

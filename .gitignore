@@ -51,7 +51,31 @@ community.key
 .goal-baseline/
 
 # User-installed extensions, personal helper scripts, and installation staging.
-/skills/
+# Publish only reviewed skill bundles; other locally installed skills stay private.
+/skills/*
+!/skills/README.md
+!/skills/antigravity-image/
+!/skills/bangumi-lookup/
+!/skills/bilibili/
+!/skills/comfy-draw/
+!/skills/cross-group-memory/
+!/skills/netease-music/
+!/skills/sticker-librarian/
+!/skills/tts-say/
+/skills/**/data/
+/skills/**/storage/
+/skills/**/cache/
+/skills/**/node_modules/
+/skills/**/.venv/
+/skills/**/__pycache__/
+/skills/**/.env*
+/skills/**/config.json
+/skills/**/cookies*.json
+/skills/**/*.key
+/skills/**/*.pem
+/skills/**/*.onnx
+/skills/**/*.bin
+/skills/**/*.safetensors
 /plugins/
 /tools/
 /data-*/

@@ -1,0 +1,58 @@
+{
+  "id": "netease-music",
+  "name": "音乐推荐",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "根据操作员网易云账号的收藏专辑（全量）和红心歌单（全量）推荐专辑/曲目。触发词「推荐音乐/来点音乐」等。底层走 cloud-music-mcp 库的只读 CLI 封装（scripts/netease-cli.py），账号 cookie 只存本地。刻意只挂只读工具：没有播放、建歌单、收藏、加歌的能力，机器人不许承诺替人做这些操作。不含每日推荐。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "pythonPath": "",
+    "scriptPath": "",
+    "maxChars": 4000,
+    "recommendMaxChars": 14000,
+    "timeoutSec": 60
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用音乐推荐",
+      "description": "关掉后 recommend/search/album 三个工具一起失效。"
+    },
+    "pythonPath": {
+      "type": "string",
+      "label": "Python 解释器路径",
+      "description": "留空使用 CLOUD_MUSIC_MCP_ROOT（默认项目同级 cloud-music-mcp）中的 .venv Python；也可指定解释器路径。"
+    },
+    "scriptPath": {
+      "type": "string",
+      "label": "CLI 脚本路径",
+      "description": "留空使用本技能 scripts/netease-cli.py。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单次返回字符上限（search/album）",
+      "description": "CLI 输出超过该长度会截断。默认 4000。"
+    },
+    "recommendMaxChars": {
+      "type": "number",
+      "label": "推荐数据字符上限",
+      "description": "推荐会返回收藏专辑与红心曲库，按实际数据量设置字符上限，避免截断。"
+    },
+    "timeoutSec": {
+      "type": "number",
+      "label": "单次查询超时（秒）",
+      "description": "recommend 要连打好几个接口，默认 60 秒。"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "推荐歌曲/专辑、查询曲目、回应音乐分享或发送音乐卡片时",
+      "priority": 45
+    }
+  }
+}

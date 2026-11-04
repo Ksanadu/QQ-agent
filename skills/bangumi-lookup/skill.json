@@ -1,0 +1,61 @@
+{
+  "id": "bangumi-lookup",
+  "name": "番剧资料查询（Bangumi）",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "category": "knowledge",
+  "entry": "index.js",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [
+    "web_fetch"
+  ],
+  "description": "让机器人查得到番剧/动漫的真实资料：评分排名、放送日期、集数与更新进度、简介、制作阵容、角色与声优。\n\n【为什么需要它】模型的训练知识有截止时间，而番剧是**最讲究时效**的一类内容 —— 新番每季都换、评分天天在动、更新进度按周推进。硬答出来的「这部番 2023 年播出、评分 8.2」很可能整句都是编的，比说不知道糟糕得多。这个技能让机器人**先查再说**。\n\n【数据来源】Bangumi（bgm.tv）公开 API，**不需要任何 Key**。官方 api.bgm.tv 挂在 Cloudflare、大陆直连基本超时，所以默认走社区镜像 bangumi.vip（接口和封面图都通）；某个源连不上会自动换下一个，全程无需干预。查询在本地发起，结果只回给模型组织语言。\n\n【四个工具】搜作品/角色/人物 ／ 查详情（含制作阵容与声优） ／ 查剧集与更新进度 ／ 今日·本周放送表\n\n【边界】只读、只查、不改数据；不查 R18 内容（默认过滤，可在设置里关）。",
+  "settings": {
+    "apiBase": "",
+    "defaultLimit": 5,
+    "allowNsfw": false,
+    "timeoutMs": 12000,
+    "requestIntervalMs": 600,
+    "userAgent": ""
+  },
+  "configSchema": {
+    "apiBase": {
+      "type": "string",
+      "label": "接口域名（留空=自动）",
+      "description": "留空即可：自动先试镜像 api.bangumi.vip，不通再试官方 api.bgm.tv，哪个通用哪个并记住。**填了就只用填的这个、不再自动兜底** —— 适合自己搭了反代的情况。镜像域名会换（如 bangumi.pro → bangumi.vip），失效时把这里清空即可恢复自动。"
+    },
+    "defaultLimit": {
+      "type": "number",
+      "label": "每次最多返回几条",
+      "description": "1~10，默认 5。给多了模型容易把不相关的作品也念出来，还费 token。"
+    },
+    "allowNsfw": {
+      "type": "boolean",
+      "label": "允许查询 R18 条目",
+      "description": "默认**关**。关掉时搜索会带 nsfw=false 过滤，R18 作品不会出现在结果里。打开后搜索结果可能包含成人向条目 —— 注意这**不代表**机器人可以在群里聊这些内容。"
+    },
+    "timeoutMs": {
+      "type": "number",
+      "label": "单次请求超时（毫秒）",
+      "description": "默认 12000。Bangumi 偶发慢响应，给太少会频繁超时、表现为「查不到」。"
+    },
+    "requestIntervalMs": {
+      "type": "number",
+      "label": "请求最小间隔（毫秒）",
+      "description": "默认 600。Bangumi 官方建议 0.5 秒一次，本技能所有请求走同一条串行队列。被限流（HTTP 429）时可以调大到 1200。"
+    },
+    "userAgent": {
+      "type": "string",
+      "label": "User-Agent（留空用内置值）",
+      "description": "留空即可。Bangumi **强制**要求规范的 User-Agent，格式为「开发者/应用名/版本 (项目地址)」；默认库的 UA 会被直接拦掉。只有在内置值也被拦（表现为 403）时才需要改这里。"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "查询番剧、动漫、角色、声优、评分、集数或放送进度时",
+      "priority": 58
+    }
+  }
+}

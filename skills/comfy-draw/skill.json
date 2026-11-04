@@ -1,0 +1,58 @@
+{
+  "id": "comfy-draw",
+  "name": "ComfyUI 本地出图",
+  "version": "2.0.1",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "仅响应 /comfy 图片要求，自动整理 Anima tags，先回复受理，再用本机 ComfyUI 生成一张并回传；不占 API 日额度。",
+  "author": "DSH",
+  "enabledByDefault": true,
+  "capabilities": [
+    "media.image-command.comfy"
+  ],
+  "requires": [],
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "workflowFile": "",
+    "mp": 1,
+    "timeoutSec": 300,
+    "selfieLoraStrength": 1,
+    "promptModel": "gemini-3.8-flash-medium"
+  },
+  "configSchema": {
+    "workflowFile": {
+      "type": "string",
+      "label": "工作流模板",
+      "description": "API 格式 JSON 的绝对路径；留空使用 data/comfy-draw/workflow.json。工作流和模型另行配置。"
+    },
+    "mp": {
+      "type": "number",
+      "label": "默认像素密度(MP)",
+      "description": "默认 1，最大 2"
+    },
+    "timeoutSec": {
+      "type": "integer",
+      "label": "生成超时（秒）",
+      "description": "超过则放弃等待"
+    },
+    "selfieLoraStrength": {
+      "type": "number",
+      "label": "自画像 LoRA 强度",
+      "description": "大肥鱼 LoRA（whale maid）强度，默认 1.0"
+    },
+    "promptModel": {
+      "type": "string",
+      "label": "提示词整理模型",
+      "description": "专门生成完整 Anima tags JSON；默认 gemini-3.8-flash-medium，不改变聊天模型"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "用户询问本地生图用法或队列时；实际生图仅由 /comfy 命令触发",
+      "priority": 40
+    }
+  }
+}

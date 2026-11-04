@@ -1,0 +1,46 @@
+{
+  "id": "bilibili",
+  "name": "B站查询",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "让机器人能查 Bilibili（B站）：视频详情/字幕/评论/相关视频、按关键词搜视频或用户、查 UP 主资料、看全站热榜。底层走本机 bili CLI（uv tool 安装的 bilibili-cli，免登录可查），输出 YAML 后由机器人转成人话。刻意只挂只读工具：没有点赞、投币、收藏、发动态的能力，机器人不许承诺替人做这些操作。",
+  "author": "本地自建",
+  "enabledByDefault": true,
+  "permissions": [],
+  "settings": {
+    "enabled": true,
+    "biliPath": "",
+    "maxChars": 4000,
+    "timeoutSec": 40
+  },
+  "configSchema": {
+    "enabled": {
+      "type": "boolean",
+      "label": "启用B站查询",
+      "description": "关掉后 video/search/user/hot 四个工具一起失效。"
+    },
+    "biliPath": {
+      "type": "string",
+      "label": "bili 可执行文件路径",
+      "description": "留空 = 自动用 %USERPROFILE%\\.local\\bin\\bili.exe（uv tool 默认位置）。换了安装位置才需要填。"
+    },
+    "maxChars": {
+      "type": "number",
+      "label": "单次查询返回字符上限",
+      "description": "CLI 输出超过该长度会截断（字幕/评论可能很长）。默认 4000。"
+    },
+    "timeoutSec": {
+      "type": "number",
+      "label": "单次查询超时（秒）",
+      "description": "默认 40 秒。B 站接口偶尔慢，超时会明确报错而不是挂着。"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "查询网络梗、新词、缩写的含义/出处，或查询分享 B站视频、UP主、字幕、搜索结果、热榜时",
+      "priority": 45
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "antigravity-image",
+  "name": "Antigravity 命令生图",
+  "version": "1.2.0",
+  "apiVersion": 1,
+  "category": "media",
+  "description": "仅响应 /generate 图片要求，支持同条附图或引用图片作为参考；自动写 prompt，先受理再回传一张 Gemini Flash Image。每个 QQ 每天 3 张，管理员不限。",
+  "enabledByDefault": true,
+  "capabilities": [
+    "media.image-command.generate"
+  ],
+  "requires": [],
+  "permissions": [
+    "web_fetch"
+  ],
+  "settings": {
+    "timeoutSec": 180
+  },
+  "configSchema": {
+    "proxyConfigFile": {
+      "type": "string",
+      "label": "Antigravity 配置文件",
+      "description": "留空读取当前用户的 .antigravity_tools/gui_config.json，密钥不复制进技能配置"
+    },
+    "timeoutSec": {
+      "type": "integer",
+      "label": "生图超时（秒）",
+      "description": "30–300 秒，默认 180 秒"
+    }
+  },
+  "prompt": {
+    "guide": {
+      "file": "QUICK_REFERENCE.md",
+      "when": "用户询问 API 生图用法、额度、参考图或状态时；实际生图仅由 /generate 命令触发",
+      "priority": 60
+    }
+  }
+}
