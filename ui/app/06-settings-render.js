@@ -1044,8 +1044,9 @@ function renderDesktopSection(c) {
 function renderOnebotSection(c) {
   return `
     <h3 id="settings-onebot">OneBot（SnowLuma）</h3>
-    <div class="hint" style="margin-bottom:10px">SnowLuma 的启动、关闭与日志已移动到顶部「SnowLuma」页签。此处只保留连接配置。</div>
-    <div class="field"><label>SnowLuma 程序目录（留空 = 自动使用项目内 snowluma/ 文件夹）</label>
+    <div class="field"><button class="btn" id="install-snowluma-btn" type="button">一键安装 GitHub 最新版 SnowLuma</button>
+      <span class="hint" id="snowluma-install-status" aria-live="polite"></span></div>
+    <div class="field"><label>SnowLuma 程序目录</label>
       <div style="display:flex;gap:8px">
         <input type="text" id="cfg-snowlumadir" value="${esc(c.snowluma.dir || '')}" style="flex:1" />
         <button class="btn btn-small" id="open-snowluma-btn">打开文件夹</button>

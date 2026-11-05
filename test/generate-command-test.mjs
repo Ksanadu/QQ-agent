@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseGenerateCommand, parseImageCommand } from '../src/image-commands.js';
-import { ImageCommandService, ADMIN_QQ, beijingDay } from '../src/image-command-service.js';
+import { ImageCommandService, beijingDay } from '../src/image-command-service.js';
+const ADMIN_QQ = '900001';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-generate-unit-'));
 let checks = 0;
@@ -32,6 +33,7 @@ function fixture(name, overrides = {}) {
   let clock = 1800000000000, allowed = true;
   const sends = [], images = [], calls = [];
   const service = new ImageCommandService({
+    isAdmin: id => String(id) === ADMIN_QQ,
     stateFile: path.join(root, name, 'quota.json'), now: () => clock,
     preparePrompt: async (request) => { calls.push('prepare'); return { prompt: `A polished image: ${request}`, ratio: '1:1' }; },
     generateImage: async () => { calls.push('generate'); return { buffer: Buffer.from('image') }; },
@@ -102,7 +104,7 @@ try {
   await admin.service.handle(admin.ctx(ADMIN_QQ, 1)).completion; assert.equal(admin.images.length, 4);
   const adminRestart = fixture('admin');
   await adminRestart.service.handle(adminRestart.ctx(ADMIN_QQ, 1)).completion; assert.equal(adminRestart.images.length, 0);
-  checks++; console.log('✓ only QQ 2456214815 is exempt; duplicate admin events remain idempotent across restart');
+  checks++; console.log('✓ only the configured image administrator is exempt; duplicate admin events remain idempotent across restart');
 
   const gate = deferred(), ack = fixture('ack');
   const pendingCtx = ack.ctx(); pendingCtx.sender.sendTextBatch = () => gate.promise;

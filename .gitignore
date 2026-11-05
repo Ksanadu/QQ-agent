@@ -83,3 +83,6 @@ community.key
 .module-install-*/
 /start-snowluma.ps1
 /stop-snowluma.ps1
+
+# Local desktop QA build artifacts
+/dist-qa*/

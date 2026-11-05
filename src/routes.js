@@ -33,12 +33,14 @@ import { safeFetchBinary, browseLockState } from './safe-fetch.js';
 import { getGlobalBlocklist, updateGlobalBlocklist, FIXED_PRICE_FEED_URL } from './community.js';
 import { listAccounts, removeAccount, loginAccount, publishModule, verifyInstallCodes, installByCode } from './market.js';
 import { detectDialect as detectThinkingDialect } from './thinking.js';
+import { SnowlumaInstaller } from './snowluma-install.js';
 
 /**
  * 构建路由表。
  * @param {object} deps 依赖注入
  */
 export function createRoutes(deps) {
+  const snowInstaller = new SnowlumaInstaller({dataDir:DATA_DIR, configure:dir => updateConfig({snowluma:{dir}})});
   const {
     store, memory, sessions, onebot, orchestrator,
     emit, log,
@@ -248,6 +250,18 @@ export function createRoutes(deps) {
     },
 
     // ── SnowLuma 进程管理 ────────────────────────────────────────────
+    {
+      method:'GET', pattern:'/api/snowluma/install',
+      handler:async ({res,json}) => json(res,200,snowInstaller.snapshot())
+    },
+    {
+      method:'POST', pattern:'/api/snowluma/install',
+      handler:async ({res,json}) => {
+        if (snowInstaller.snapshot().status === 'installing') return json(res,202,snowInstaller.snapshot());
+        if (snowlumaStatus().pid || await deps.isPortOpen('127.0.0.1',deps.snowlumaWebuiPort())) return json(res,409,{error:'请先停止 SnowLuma 再安装或更新'});
+        return json(res,202,snowInstaller.start(snowlumaDir()));
+      }
+    },
     {
       method: 'POST', pattern: '/api/snowluma/launch',
       handler: async ({ res, json }) => {

@@ -5,30 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QQ Agent</title>
   <!-- 内容安全策略：控制台只应加载本机资源。
-       首屏主题预置脚本必须内联（否则会闪白），用它的 sha256 hash 精确放行 ——
-       不再用 'unsafe-inline'（页面多处 innerHTML 拼接，一旦任何一处被注入，
+       首屏主题预置由本机 theme-init.js 同步加载，
+       脚本不使用 'unsafe-inline'（页面多处 innerHTML 拼接，一旦任何一处被注入，
        unsafe-inline 会让 onerror= 等内联代码直接执行，CSP 形同虚设）。
        内联样式仍放行（style-src）：主题/布局大量使用内联 style 属性。
        2026-09-26 例外：意见收集/金句上传引入阿里云验证码 2.0（防垃圾上传），
        官方要求必须动态加载 o.alicdn.com 的 SDK 并直连 aliyuncs 验签域，
        故 script-src / connect-src / frame-src / worker-src 增列对应来源，
        其余仍锁死在 'self'。 -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-AusRctWgAU9T2N4jaRWpaSsObfjDZwj+sO1AcdUK5/s=' https://o.alicdn.com https://kondius.cn; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; media-src 'self' data: blob:; connect-src 'self' https://kondius.cn https://*.aliyuncs.com https://*.alicdn.com; frame-src https://*.aliyuncs.com https://*.alicdn.com https://kondius.cn; worker-src 'self' blob: https://*.alicdn.com https://kondius.cn; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://o.alicdn.com https://kondius.cn; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; media-src 'self' data: blob:; connect-src 'self' https://kondius.cn https://*.aliyuncs.com https://*.alicdn.com; frame-src https://*.aliyuncs.com https://*.alicdn.com https://kondius.cn; worker-src 'self' blob: https://*.alicdn.com https://kondius.cn; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <link rel="stylesheet" href="/style.css" />
-  <script>
-    /* 主题预置：在样式生效前就定好 data-theme，避免首屏闪白/闪黑。
-       只认 dark / light，非法值回退暗色。
-       这里只做"应用"，真正的切换逻辑与持久化在前端脚本。 */
-    (function () {
-      try {
-        var saved = localStorage.getItem('qqa-theme') || '';
-        var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (e) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
-    })();
-  </script>
+  <script src="/theme-init.js"></script>
 </head>
 <body>
   <header id="topbar">

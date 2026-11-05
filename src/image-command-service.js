@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { getConfig } from './config.js';
 
 export const IMAGE_MODEL = 'gemini-3.1-flash-image';
-export const ADMIN_QQ = '2456214815';
+// Kept as an empty compatibility export; administrator identities are local config.
+export const ADMIN_QQ = '';
 export const DAY_MS = 86400000;
 export function beijingDay(time) { return new Date(time + 8 * 3600000).toISOString().slice(0, 10); }
 
@@ -20,8 +22,9 @@ function atomicJson(file, value) {
 
 export class ImageCommandService {
   constructor({ stateFile, preparePrompt, generateImage, saveImage, now = Date.now, log = () => {},
-    commandName = 'generate', model = IMAGE_MODEL, dailyLimit = 3, maxActive = 2, maxPending = 12 }) {
-    Object.assign(this, { stateFile, preparePrompt, generateImage, saveImage, now, log, commandName, model, dailyLimit, maxActive, maxPending });
+    commandName = 'generate', model = IMAGE_MODEL, dailyLimit = 3, maxActive = 2, maxPending = 12,
+    isAdmin = id => (getConfig().imageGeneration?.adminUserIds || []).map(String).includes(String(id)) }) {
+    Object.assign(this, { stateFile, preparePrompt, generateImage, saveImage, now, log, commandName, model, dailyLimit, maxActive, maxPending, isAdmin });
     this.queue = []; this.active = new Set(); this.stopped = false;
   }
 
@@ -54,7 +57,7 @@ export class ImageCommandService {
     if (eventKey && state.events[eventKey] && now - state.events[eventKey] < 2 * DAY_MS) return { duplicate: true };
     let usage = state.users[command.actorId];
     if (!usage || usage.day !== day) usage = { day, entries: [] };
-    const limited = this.dailyLimit != null && command.actorId !== ADMIN_QQ;
+    const limited = this.dailyLimit != null && !this.isAdmin(command.actorId);
     if (limited && usage.entries.length >= this.dailyLimit) return { exhausted: true };
     for (const [key, time] of Object.entries(state.events)) if (now - time >= 2 * DAY_MS) delete state.events[key];
     for (const [key, user] of Object.entries(state.users)) if (user.day !== day) delete state.users[key];
@@ -66,7 +69,7 @@ export class ImageCommandService {
   }
 
   releaseUnused(job) {
-    if (job.imageCreated || this.dailyLimit == null || job.command.actorId === ADMIN_QQ) return;
+    if (job.imageCreated || this.dailyLimit == null || this.isAdmin(job.command.actorId)) return;
     try {
       const state = this.readState();
       const usage = state.users[job.command.actorId];
@@ -153,7 +156,7 @@ export class ImageCommandService {
       this.releaseUnused(job);
       this.log(`[${this.commandName}] 失败 actor=${job.command.actorId} stage=${job.imageCreated ? 'save-or-delivery' : job.attempted ? 'generation' : 'prepare'}: ${error.message}`);
       if (!job.controller.signal.aborted && job.canSend()) {
-        const counted = this.dailyLimit != null && job.command.actorId !== ADMIN_QQ;
+        const counted = this.dailyLimit != null && !this.isAdmin(job.command.actorId);
         const hint = !job.imageCreated && typeof error.userMessage === 'string' ? error.userMessage : job.imageCreated
           ? `图片已生成，但保存或发送失败，请联系管理员。${counted ? '这张已计入今天的 3 张额度。' : ''}`
           : `本次未能生成图片，请稍后再试。${counted ? '本次未消耗每日额度。' : ''}`;

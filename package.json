@@ -1,6 +1,6 @@
 {
   "name": "qq-agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": false,
   "description": "QQ 群 AI 机器人（桌面版）：事件驱动的无状态 Agent，接 OpenAI 兼容 API，带会话式控制台。",
   "type": "module",
@@ -8,24 +8,22 @@
   "build": {
     "appId": "cn.kondius.qq-agent",
     "productName": "QQ Agent",
-    "artifactName": "QQ-Agent-V0.4-Preview-Setup.exe",
+    "artifactName": "QQ-Agent-${version}-Setup.${ext}",
     "asar": false,
     "files": [
-      "**/*",
-      "!data/**",
-      "!community.key",
-      "!community.key.example",
-      "!server/**",
-      "!snowluma/config/**",
-      "!snowluma/data/**",
-      "!snowluma/logs/**",
-      "!test/**",
-      "!doc/**",
-      "!scripts/**",
-      "!dist/**",
-      "!**/*.map",
-      "!package-lock.json.bak",
-      "!*.log"
+      "LICENSE",
+      "assets/**/*",
+      "electron/**/*",
+      "src/**/*",
+      "ui/**/*",
+      "skills/**/*",
+      "package.json",
+      "!**/*.bak",
+      "!**/*.tmp",
+      "!**/__pycache__/**",
+      "!skills/**/data/**",
+      "!skills/**/storage/**",
+      "!skills/**/.env*"
     ],
     "win": {
       "target": [
@@ -85,7 +83,10 @@
     "test:wakesem": "node test/wake-semantics-test.mjs",
     "test:chat-features": "node test/chat-history-tasks.mjs && node test/snowluma-ptt-patch-test.mjs && node test/qq-speech-test.mjs && node test/image-album-test.mjs && node test/bilibili-card-test.mjs && node test/conversation-listener-test.mjs && node test/conversation-listener-race.mjs && node test/conversation-listener-settings-ui.mjs",
     "test:skill-guides": "node test/skill-guides-test.mjs && node test/skill-guides-e2e.mjs && node test/skill-watch-test.mjs",
-    "test:wake-windows": "node test/wake-window-refresh-e2e.mjs && node test/pure-at-batch-e2e.mjs && node test/conversation-listener-settings-ui.mjs"
+    "test:wake-windows": "node test/wake-window-refresh-e2e.mjs && node test/pure-at-batch-e2e.mjs && node test/conversation-listener-settings-ui.mjs",
+    "build:desktop": "electron-builder --win nsis --x64",
+    "pack:desktop": "electron-builder --win --dir --x64",
+    "test:snowluma-install": "node test/snowluma-install-test.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1",

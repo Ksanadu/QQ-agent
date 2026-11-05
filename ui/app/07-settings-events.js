@@ -992,6 +992,26 @@ function bindSettingsEvents(c) {
   });
 
   // ── OneBot 区块事件 ──
+  const installSnowBtn = $('#install-snowluma-btn');
+  if (installSnowBtn) {
+    const showInstall = async () => {
+      if (!installSnowBtn.isConnected) return;
+      try {
+        const s = await api('/api/snowluma/install');
+        installSnowBtn.disabled = s.status === 'installing';
+        const hint = $('#snowluma-install-status');
+        if (hint) hint.textContent = s.status === 'installing' ? `正在安装 ${s.version || ''} ${s.total ? Math.round(s.received / s.total * 100) + '%' : ''}`
+          : s.status === 'done' ? `${s.version} 已安装，可到 SnowLuma 页启动并登录` : s.error || '';
+        if (s.status === 'installing') setTimeout(showInstall,1000);
+      } catch (e) { if ($('#snowluma-install-status')) $('#snowluma-install-status').textContent = e.message; installSnowBtn.disabled = false; }
+    };
+    installSnowBtn.addEventListener('click', async () => {
+      installSnowBtn.disabled = true;
+      try { await api('/api/snowluma/install',{method:'POST',body:'{}'}); await showInstall(); }
+      catch(e) { $('#snowluma-install-status').textContent = e.message; installSnowBtn.disabled = false; }
+    });
+    showInstall();
+  }
   const openSnowlumaBtn = $('#open-snowluma-btn');
   if (openSnowlumaBtn) openSnowlumaBtn.addEventListener('click', async () => {
     await saveConfig({ quiet: true });

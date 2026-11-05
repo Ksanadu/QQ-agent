@@ -134,6 +134,12 @@ export function createApp({ log = console.log } = {}) {
   function snowlumaDir() {
     const configured = String(getConfig().snowluma?.dir || '').trim();
     if (configured) return configured;
+    const dependencies = path.join(DATA_DIR, 'dependencies');
+    if (fs.existsSync(dependencies)) {
+      const installed = fs.readdirSync(dependencies).filter(n => n.startsWith('snowluma-'))
+        .map(n => path.join(dependencies,n)).find(dir => fs.existsSync(path.join(dir,'index.mjs')) && fs.existsSync(path.join(dir,'node.exe')));
+      if (installed) return installed;
+    }
     const bundled = path.join(ROOT, 'snowluma');
     if (fs.existsSync(bundled)) return bundled;
     // 安装版：asar 里的文件不可执行，electron-builder 会把 snowluma/ 解包到
@@ -1449,15 +1455,15 @@ export function createApp({ log = console.log } = {}) {
         if (ext === '.html') {
           // CSP 用 HTTP 头再声明一次：header 里的 frame-ancestors 才生效
           // （meta 版本会被浏览器忽略该指令），同时给不解析 meta 的场景兜底。
-          // ⚠️ script-src 与 index.html 的 meta 版本同款（sha256 hash 精确放行
-          //    首屏主题预置脚本，不含 unsafe-inline）—— 两处口径必须一致，
+          // ⚠️ script-src 与 index.html 的 meta 版本一致（主题预置为本机外部脚本，
+          //    不含 unsafe-inline）—— 两处口径必须一致，
           //    否则 meta 被剥离的场景下 unsafe-inline 立即生效。
           // 2026-09-26：验证码 SDK 需要动态加载 o.alicdn.com（及 kondius.cn 反代）、
           //    XHR 到 *.aliyuncs.com —— 与 meta 版本同步放行；**meta 与 HTTP 头两份
           //    CSP 浏览器取交集执行，只改一处等于没改**（本次 alicdn 加载失败即漏改此处）。
           headers['content-security-policy'] = [
             "default-src 'self'",
-            "script-src 'self' 'sha256-xBF5qExTuqfXHlYtKYaaldGJshQgQOr5zvcGHjbPL7w=' https://o.alicdn.com https://kondius.cn",
+            "script-src 'self' https://o.alicdn.com https://kondius.cn",
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: http: https:",
             "media-src 'self' data: blob:",

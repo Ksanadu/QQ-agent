@@ -42,7 +42,9 @@
   nsExec::ExecToLog '"$SYSDIR\robocopy.exe" "${SRC}" "${DST}" /E /R:0 /W:0 /NFL /NDL /NJH /NJS /NP'
   Pop $R9
   ${If} $R9 > 7
-    DetailPrint "⚠ 复制失败（robocopy 返回 $R9）：${SRC}"
+    DetailPrint "Backup or restore failed (robocopy $R9): ${SRC}"
+    SetErrorLevel 2
+    Abort
   ${EndIf}
 !macroend
 
@@ -133,7 +135,10 @@ FunctionEnd
   ; 2) 查到了就立刻备份（放在持久目录而不是 $PLUGINSDIR：
   ;    万一安装中途崩了，用户还能自己从那儿把数据捞回来）
   ${If} $DetectedDir != ""
-    StrCpy $BackupDir "$LOCALAPPDATA\QQ Agent\upgrade-backup"
+    CreateDirectory "$LOCALAPPDATA\QQ Agent\upgrade-backup"
+    GetTempFileName $BackupDir "$LOCALAPPDATA\QQ Agent\upgrade-backup"
+    Delete "$BackupDir"
+    CreateDirectory "$BackupDir"
 
     ; 先关掉正在运行的 QQ Agent。必须在复制之前做：
     ; 程序开着时 data\logs\*.log 是打开状态，不关就会复制不全
