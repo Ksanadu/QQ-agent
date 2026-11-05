@@ -225,8 +225,7 @@ function createTierBar({ mount, dual = false, low = 100, high = 10, onChange = n
  *       "两套滑条 id + 按元素存在性猜象限"这一类 bug。
  * 峰谷：同一条滑条上两颗珠 —— 上面那颗（档位更高）= 低谷时段档位，
  *       下面那颗 = 高峰时段档位，互不交叉；两珠之间画一条半透明区间带。
- * 保存语义与原模态框一致：改动先落草稿，点「保存」整体提交
- * （store / chatActive 一次写盘），「取消」放弃未保存的改动。
+ * 主编辑器与附属参数弹窗改动自动提交。
  * 「每个群聊单独设置」开关在折叠卡头部；「指令禁言」已独立成自己的折叠卡
  * （走设置页自动保存），不再进这里的草稿。峰谷的启用开关在「峰谷设置」按钮内。
  *
@@ -299,12 +298,10 @@ function mountActiveConfigEditor(root) {
             </div>
           </div>
       </div>
-      <div class="field" style="display:flex;gap:8px;align-items:center;margin-top:12px">
-        <button class="btn" id="ac-cancel">取消</button>
-        <button class="btn btn-primary" id="ac-save">保存</button>
-        <span class="hint">改动先落在草稿里：「保存」整体提交，「取消」放弃未保存的改动。</span>
-      </div>`;
+      `;
   const overlay = root;
+  let saveQueue = Promise.resolve();
+  const autoSave = () => saveAll().catch(e => alert(`保存活跃设置失败：${e.message}`));
 
   // 「峰谷时段 / 档位参数 / 统一设置」三件套在折叠卡头部（setCard 的 extra 插槽），
   // 不在编辑器体内 —— 统一从卡头取用（测试桩环境 closest 为 null 时退回体内查找）。
@@ -350,6 +347,7 @@ function mountActiveConfigEditor(root) {
         else if (activeGid) dGroupPos[activeGid] = low;
       }
       refreshAfterValueChange(peakOn);
+      autoSave();
     }
   });
   activeVSlider = vsl;
@@ -396,6 +394,7 @@ function mountActiveConfigEditor(root) {
     delete dGroupPeak[activeGid];
     renderGroupButtons();
     syncSliderUI();
+    autoSave();
   });
 
   // ── 刻度 / 说明 ──
@@ -485,8 +484,8 @@ function mountActiveConfigEditor(root) {
     syncSliderUI();
   }
   // 「统一设置」/「峰谷」开关：改动即时反映到滑条形态与显隐
-  chkUnified?.addEventListener('change', () => applyQuadrantUI());
-  chkPeak?.addEventListener('change', () => applyQuadrantUI());
+  chkUnified?.addEventListener('change', () => { applyQuadrantUI(); autoSave(); });
+  chkPeak?.addEventListener('change', () => { applyQuadrantUI(); autoSave(); });
 
   // 快捷档位预设胶囊已按需求移除（统一全部群开关保留）；
   // 档位定位由滑条拖动 + 松手吸附（1/2/4 档回中心）承担。
@@ -528,7 +527,7 @@ function mountActiveConfigEditor(root) {
       };
     } else {
       storePatch.contextSliderPos = dContextPos;
-      storePatch.peakSchedule = { ...psNow, enabled: false };
+      storePatch.peakSchedule = { ...psNow, enabled: false, peak: { ...psNow.peak, start: peakStart, end: peakEnd } };
     }
     // 分群两张图整体替换（__ 开头内部键已在装填时剔除，不会写回配置）
     storePatch.groupSliderPos = { __replace__: dGroupPos };
@@ -542,9 +541,15 @@ function mountActiveConfigEditor(root) {
     if (extra.chatActive) {
       patch.chatActive = { ...(state.config?.chatActive || {}), ...extra.chatActive };
     }
-    const r = await api('/api/config', { method: 'POST', body: JSON.stringify(patch) });
-    if (r?.config) state.config = r.config;
-    return r;
+    // 捕获本次控件值后串行提交，避免快速连续拖动时旧请求覆盖新值。
+    const body = JSON.stringify(patch);
+    const pending = saveQueue.catch(() => {}).then(async () => {
+      const r = await api('/api/config', { method: 'POST', body });
+      if (r?.config) state.config = r.config;
+      return r;
+    });
+    saveQueue = pending;
+    return pending;
   }
 
   // ── 峰谷时段模态框（高峰时段 / 预设方案 / 自定义保存）──
@@ -572,8 +577,7 @@ function mountActiveConfigEditor(root) {
               <div class="hint" id="peak-preset-hint" style="margin-top:4px">选预设自动填充时段与两个档位点（套用到当前编辑的滑条）。</div></div>
           </div>
           <div class="field"><button class="btn btn-small" id="peak-preset-save-btn" type="button">保存当前方案为「自定义」</button></div>`,
-      foot: `<button class="btn" id="ac-peak-cancel">取消</button>
-             <button class="btn btn-primary" id="ac-peak-save">保存</button>`
+      foot: `<button class="btn" id="ac-peak-cancel">完成</button>`
     });
     // 预设套用：写当前在场的滑条（applyPeakPreset 设值后派发 input，联动自动刷新）
     const peakPreset = sub.querySelector('#cfg-peak-preset');
@@ -601,22 +605,12 @@ function mountActiveConfigEditor(root) {
         alert(`保存自定义失败：${e2.message}`);
       }
     });
-    sub.querySelector('#ac-peak-cancel')?.addEventListener('click', () => {
-      closeModelModal(sub);
-      applyQuadrantUI();   // 取消 = 放弃未保存的开关/时段改动，滑条形态回到已存配置
-    });
-    sub.querySelector('#ac-peak-save')?.addEventListener('click', async () => {
-      try {
-        // 启用与否读「峰谷设置」按钮上的开关（所见即所得），时段来自本弹窗
-        await saveAll({
-          peakStart: sub.querySelector('#cfg-peak-start')?.value || '09:00',
-          peakEnd: sub.querySelector('#cfg-peak-end')?.value || '18:00'
-        });
-        closeModelModal(sub);
-        loadSettings();
-      } catch (e) {
-        alert(`保存峰谷设置失败：${e.message}`);
-      }
+    sub.querySelector('#ac-peak-cancel')?.addEventListener('click', () => closeModelModal(sub));
+    sub.addEventListener('change', () => {
+      saveAll({
+        peakStart: sub.querySelector('#cfg-peak-start')?.value || '09:00',
+        peakEnd: sub.querySelector('#cfg-peak-end')?.value || '18:00'
+      }).catch(e => alert(`保存峰谷设置失败：${e.message}`));
     });
   }
 
@@ -646,11 +640,10 @@ function mountActiveConfigEditor(root) {
           <label for="tp-chatactive">被召唤后可持续参与话题（1/2/3 档触发时生效）</label></div>
         <div class="field"><label>活跃期最长持续（分钟，到期自动潜水）</label>
           <input type="number" id="tp-chatactive-ttl" min="1" max="240" value="${esc(Number(cNow.chatActive?.ttlMinutes ?? 30))}" style="max-width:160px" /></div>`,
-      foot: `<button class="btn" id="tp-cancel">取消</button>
-             <button class="btn btn-primary" id="tp-save">保存</button>`
+      foot: `<button class="btn" id="tp-cancel">完成</button>`
     });
     sub.querySelector('#tp-cancel')?.addEventListener('click', () => closeModelModal(sub));
-    sub.querySelector('#tp-save')?.addEventListener('click', async () => {
+    sub.addEventListener('change', async () => {
       try {
         await saveAll({
           tierParams: {
@@ -666,8 +659,6 @@ function mountActiveConfigEditor(root) {
             ttlMinutes: Math.min(240, Math.max(1, Number(sub.querySelector('#tp-chatactive-ttl')?.value) || 30))
           }
         });
-        closeModelModal(sub);
-        loadSettings();
       } catch (e) {
         alert(`保存档位参数失败：${e.message}`);
       }
@@ -688,15 +679,6 @@ function mountActiveConfigEditor(root) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeakModal(); }
   });
   ctrl('#ac-tier-params-btn')?.addEventListener('click', openTierParamsModal);
-  overlay.querySelector('#ac-cancel')?.addEventListener('click', () => renderSettings());
-  overlay.querySelector('#ac-save')?.addEventListener('click', async () => {
-    try {
-      await saveAll();
-      loadSettings();
-    } catch (e) {
-      alert(`保存失败：${e.message}`);
-    }
-  });
 }
 
 /**

@@ -57,7 +57,7 @@ function renderSettingsSidebar() {
     ['persona', '人设'],
     ['allow', '聊天白名单'],
     ['chat', '聊天设置'],
-    ['desktop', '桌面端'],
+    ['desktop', '界面与系统'],
     ['onebot', 'OneBot（SnowLuma）'],
     ['tools', '工具与技能'],
     ['approvals', '操作批准']
@@ -200,7 +200,7 @@ function renderApiSection(c) {
         <button class="btn" id="open-model-config-btn">⚙ 模型配置</button>
         <button class="btn" id="open-model-manage-btn">🗂 模型管理</button>
       </div>
-      <div class="hint" id="provider-hint" style="margin-top:6px">${currentProvider ? `当前：${esc(currentProvider.displayName)} · ${esc(c.api.model || '未选模型')} @ ${esc(currentProvider.baseURL)}${currentProvider.hasKey ? ' · 已保存 API Key（不显示）' : ' · 未保存 API Key'}` : '尚未选择模型'}</div>
+      <div class="hint" id="provider-hint" style="margin-top:6px">${currentProvider ? `当前：${esc(currentProvider.displayName)} · ${esc(c.api.model || '未选模型')} @ ${esc(currentProvider.baseURL)}${currentProvider.hasKey ? ' · 已保存 API Key' : ' · 未保存 API Key'}` : '尚未选择模型'}</div>
       <div class="hint" id="model-vision-hint" style="margin-top:6px"></div>
       <input type="hidden" id="cfg-provider" value="${esc(c.api.provider || '')}" />
       <input type="hidden" id="cfg-model" value="${esc(c.api.model || '')}" />
@@ -278,23 +278,6 @@ function renderSearchSection(c) {
   const modelProviders = state.providers?.length ? state.providers : (c.providers || []);
   return `
     <h3 id="settings-search">搜索服务</h3>
-    <div class="hint" style="margin-bottom:12px">
-      当前提供方：${prov === 'bing' ? 'Bing 网页解析' : prov === 'antigravity' ? 'Antigravity 原生 Google 搜索' : prov === 'deepseek' ? 'DeepSeek 原生搜索' : prov === 'zhipu' ? '智谱 Web Search' : prov === 'bocha' ? '博查 AI Search' : prov === 'baidu' ? '百度千帆 AI Search' : prov === 'metaso' ? '秘塔 AI 搜索' : '自定义'}
-      ${(() => {
-        // 当前提供方已保存的 Key 状态（与模型 API 页同款提示口径）
-        const keyState = {
-          deepseek: c.webSearch?.deepseek?.hasApiKey,
-          zhipu: c.webSearch?.zhipu?.hasApiKey,
-          bocha: c.webSearch?.bocha?.hasApiKey,
-          baidu: c.webSearch?.baidu?.hasApiKey,
-          metaso: c.webSearch?.metaso?.hasApiKey
-        }[prov];
-        if (prov === 'bing') return ' · 无需 API Key';
-        if (prov === 'antigravity') return ' · 复用所选模型提供商连接';
-        if (prov?.startsWith('custom:')) return '';
-        return keyState ? ' · 已保存 API Key（不显示）' : ' · 未保存 API Key';
-      })()}
-    </div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-websearch" ${c.webSearch?.enabled !== false ? 'checked' : ''} />
       <label for="cfg-websearch">联网搜索：启用 web_search / web_fetch 工具</label></div>
     <div class="field"><label>搜索提供方</label>
@@ -321,7 +304,7 @@ function renderSearchSection(c) {
       <div style="display:flex;gap:8px">
         <input type="password" id="cfg-custom-sp-key" value="${esc(customProvs.find((p) => `custom:${p.id}` === prov)?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
         <button class="btn btn-small" id="cfg-custom-sp-key-toggle" type="button">显示</button>
-        <button class="btn btn-small btn-danger" id="cfg-custom-sp-key-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+        <button class="btn btn-small btn-danger" id="cfg-custom-sp-key-clear" type="button" title="清除 API Key">清除密钥</button>
       </div>
     </div>
     <div class="field" id="bing-search-fields" style="${prov === 'bing' ? '' : 'display:none'}"><label>搜索地址（高级：可替换为兼容 Bing 结果格式的引擎）</label><input type="text" id="cfg-searchurl" value="${esc(c.webSearch?.searchUrl || 'https://cn.bing.com/search')}" /></div>
@@ -332,14 +315,13 @@ function renderSearchSection(c) {
         </select></div>
         <div class="field"><label for="cfg-ag-searchmodel">Google 搜索使用的 Gemini 模型</label><select id="cfg-ag-searchmodel">${googleSearchModelOptions(c, c.webSearch?.antigravity?.providerId || 'antigravity', c.webSearch?.antigravity?.model || 'gemini-3.8-flash-medium')}</select></div>
       </div>
-      <div class="hint">该连接需要支持原生 Gemini 接口与 Google 搜索。单独请求并返回搜索来源，会消耗所选 Gemini 模型额度；未返回真实来源时明确报错，不回退到 Bing。</div>
     </div>
     <div class="field-row" id="deepseek-search-fields" style="${prov === 'deepseek' ? '' : 'display:none'}">
       <div class="field"><label>DeepSeek 搜索 API Key（留空用环境变量 DEEPSEEK_API_KEY）</label>
         <div style="display:flex;gap:8px">
           <input type="password" id="cfg-ds-searchkey" value="${esc(c.webSearch?.deepseek?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
           <button class="btn btn-small" id="cfg-ds-searchkey-toggle" type="button">显示</button>
-          <button class="btn btn-small btn-danger" id="cfg-ds-searchkey-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+          <button class="btn btn-small btn-danger" id="cfg-ds-searchkey-clear" type="button" title="清除 API Key">清除密钥</button>
         </div></div>
       <div class="field"><label>模型</label><input type="text" id="cfg-ds-searchmodel" value="${esc(c.webSearch?.deepseek?.model || 'deepseek-v4-flash')}" /></div>
     </div>
@@ -348,7 +330,7 @@ function renderSearchSection(c) {
         <div style="display:flex;gap:8px">
           <input type="password" id="cfg-zhipu-key" value="${esc(c.webSearch?.zhipu?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
           <button class="btn btn-small" id="cfg-zhipu-key-toggle" type="button">显示</button>
-          <button class="btn btn-small btn-danger" id="cfg-zhipu-key-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+          <button class="btn btn-small btn-danger" id="cfg-zhipu-key-clear" type="button" title="清除 API Key">清除密钥</button>
         </div></div>
       <div class="field"><label>搜索引擎</label>
         <select id="cfg-zhipu-engine">
@@ -363,21 +345,21 @@ function renderSearchSection(c) {
       <div style="display:flex;gap:8px">
         <input type="password" id="cfg-bocha-key" value="${esc(c.webSearch?.bocha?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
         <button class="btn btn-small" id="cfg-bocha-key-toggle" type="button">显示</button>
-        <button class="btn btn-small btn-danger" id="cfg-bocha-key-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+        <button class="btn btn-small btn-danger" id="cfg-bocha-key-clear" type="button" title="清除 API Key">清除密钥</button>
       </div></div>
     <div class="field" id="baidu-search-fields" style="${prov === 'baidu' ? '' : 'display:none'}">
       <label>百度千帆 API Key（留空用环境变量 BAIDU_SEARCH_API_KEY）</label>
       <div style="display:flex;gap:8px">
         <input type="password" id="cfg-baidu-key" value="${esc(c.webSearch?.baidu?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
         <button class="btn btn-small" id="cfg-baidu-key-toggle" type="button">显示</button>
-        <button class="btn btn-small btn-danger" id="cfg-baidu-key-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+        <button class="btn btn-small btn-danger" id="cfg-baidu-key-clear" type="button" title="清除 API Key">清除密钥</button>
       </div></div>
     <div class="field" id="metaso-search-fields" style="${prov === 'metaso' ? '' : 'display:none'}">
       <label>秘塔 API Key（可选，留空用官方免费额度 / 环境变量 METASO_API_KEY）</label>
       <div style="display:flex;gap:8px">
         <input type="password" id="cfg-metaso-key" value="${esc(c.webSearch?.metaso?.hasApiKey ? '******' : '')}" placeholder="输入新 Key 可替换；留空保持不变" autocomplete="new-password" style="flex:1" />
         <button class="btn btn-small" id="cfg-metaso-key-toggle" type="button">显示</button>
-        <button class="btn btn-small btn-danger" id="cfg-metaso-key-clear" type="button" title="清除已保存的 API Key（留空保存并不会清除，必须点这个按钮）">清除密钥</button>
+        <button class="btn btn-small btn-danger" id="cfg-metaso-key-clear" type="button" title="清除 API Key">清除密钥</button>
       </div></div>
 
     <h3>添加自定义搜索服务</h3>
@@ -618,7 +600,7 @@ function openPerChatPersonaModal(chatKey) {
         <textarea id="pcp-customrules" style="min-height:80px" placeholder="可选：追加到系统提示的规则（留空 = 用全局）">${esc(conf.customRules || '')}</textarea></div>
       <div class="field"><label>系统提示词覆盖（高级 · 可选）</label>
         <textarea id="pcp-sysprompt" style="min-height:80px" placeholder="可选：整体替换系统提示（留空 = 用全局）">${esc(conf.systemPromptOverride || '')}</textarea></div>
-      <div class="hint" style="margin-top:6px">机器人名字/群内展示名不按会话变化（账号身份，改了会与 @ 判定对不上），在统一人设里设置。</div>`,
+      <div class="hint" style="margin-top:6px">机器人名字和展示名在统一人设中设置。</div>`,
     foot: `<button class="btn" id="pcp-clear">清空独立人设</button>
            <button class="btn" id="pcp-cancel">取消</button>
            <button class="btn btn-primary" id="pcp-save">保存</button>`
@@ -888,7 +870,7 @@ return `
             return `<option value="${v}" ${sel === v ? 'selected' : ''}>${l}</option>`;
           }).join('')}
         </select>
-        <div class="hint">内置落成各厂商思考参数（off~max 六档）；渠道不支持高档时向下就近映射。</div></div>
+        <div class="hint">设置模型的思考强度。</div></div>
       <div class="field-row">
         <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">等待期间，唤醒者的新消息重新计时，其他人的消息不延长窗口。</div></div>
         <div class="field"><label>批次间隔（毫秒）</label><input type="number" id="sc-draindelay" min="0" value="${esc(c.drainDelayMs)}" /></div>
@@ -906,7 +888,7 @@ return `
         <div class="field"><label>每分钟最多发送</label><input type="number" id="sc-maxpermin" min="1" value="${esc(c.send?.maxPerMinute ?? 80)}" /></div>
         <div class="field"><label>每小时最多发送</label><input type="number" id="sc-maxperhour" min="1" value="${esc(c.send?.maxPerHour ?? 500)}" /></div>
       </div>
-      <div class="hint">改动即时生效（自动保存），无需单独点保存。</div>`
+`
     })}
     ${fold({
       id: 'card-active-config',
@@ -964,7 +946,7 @@ return `
       </div>
       <div class="checkbox-row"><input type="checkbox" id="ac-cmdmute-enabled" ${c.commandMute?.enabled !== false ? 'checked' : ''} />
         <label for="ac-cmdmute-enabled">启用指令禁言</label></div>
-      <div class="hint">改动即时生效（自动保存），无需单独点保存。</div>`
+`
     })}
 
     ${fold({
@@ -1018,11 +1000,13 @@ return `
 
 function renderDesktopSection(c) {
   return `
-    <h3>桌面端</h3>
+    <h3>界面与系统</h3>
+    ${window.qqAgentShell ? `
     <div class="checkbox-row"><input type="checkbox" id="cfg-autostart" ${c.server?.autoStart ? 'checked' : ''} />
       <label for="cfg-autostart">开机自启</label></div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-closetray" ${c.server?.closeToTray !== false ? 'checked' : ''} />
       <label for="cfg-closetray">点关闭时最小化到托盘</label></div>
+    ` : ''}
     <h3>界面</h3>
     <div class="field"><label>主题</label>
       <div class="theme-picker" id="theme-picker">
@@ -1211,7 +1195,7 @@ function renderSkillSettingsModal(skill) {
     </div>
     <div class="skill-modal__body">
       <div class="skill-modal__note">
-        共 <b>${keys.length}</b> 项设置 · 保存在 <code>config.skills['${esc(skillId)}']</code>，只有这个技能会读到它们。
+        共 <b>${keys.length}</b> 项设置
       </div>
       <div class="skill-form">${keys.map(fieldHtml).join('')}</div>
       ${internalKeys.length ? `<div class="skill-modal__internal">
@@ -1316,7 +1300,7 @@ const MODULE_KINDS = {
     dir: 'skills/',
     emptyHint: `还没加载到任何技能。<br />LLM 型技能放在项目的 <code>skills/&lt;id&gt;/</code> 目录，需要 <code>skill.json</code> + <code>index.js</code>。`,
     lead: `技能是 <b>LLM 型</b>扩展：它们注册工具进模型的 function 列表，<b>用不用、什么时候用由模型自己判断</b>。<br />
-      所以技能不会"一定生效" —— 模型可能一直不调用它。需要"条件满足必跑"的功能，应该做成插件（见旁边的「插件」页签）。`,
+      `,
     setupTitle: '新增技能',
     setupHint: `在 <code>skills/&lt;id&gt;/</code> 放 <code>skill.json</code> + <code>index.js</code>，
       导出 <code>setup(api)</code> 并在里面 <code>api.registerTool({...})</code>。
@@ -1689,7 +1673,7 @@ function renderToolsSection(c) {
       open: true,
       body: `
         <div class="checkbox-row">
-          ${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统（关闭后机器人只能看不能做任何操作）')}
+          ${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统')}
         </div>
         <div class="tool-actions" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-small" id="tools-enable-all">全部启用</button>
