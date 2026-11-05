@@ -169,6 +169,22 @@ function renderSettingsSection(c) {
   return `
     ${render()}`;
 }
+function settingsModelOptions(provider, model) {
+  const selected = JSON.stringify([provider || '', model || '']);
+  const providers = state.providers || [];
+  let known = false;
+  const groups = providers.map(p => '<optgroup label="' + esc(p.displayName || p.id) + '">' + (p.models || []).map(m => {
+    const id = typeof m === 'string' ? m : m.id;
+    const value = JSON.stringify([p.id,id]); if (value === selected) known = true;
+    return `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(p.modelNames?.[id] || id)}</option>`;
+  }).join('') + '</optgroup>').join('');
+  return (!known ? `<option value="${esc(selected)}" selected>${esc(model || '选择模型')}</option>` : '') + groups;
+}
+function settingsSpecialModelOptions(selected = '') {
+  const ids = [...new Set((state.providers || []).flatMap(p => (p.models || []).map(m => typeof m === 'string' ? m : m.id)))];
+  if (selected && !ids.includes(selected)) ids.unshift(selected);
+  return '<option value="">跟随主模型</option>' + ids.map(id => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(id)}</option>`).join('');
+}
 function renderApiSection(c) {
   const currentProvider = (state.providers || []).find((p) => p.id === c.api.provider);
   const currentModelDisplay = (currentProvider?.modelNames || {})[c.api.model] || c.api.model;
@@ -193,10 +209,12 @@ function renderApiSection(c) {
       title: '模型与渠道',
       sub: '提供商 / 模型 / BaseURL',
       val: esc(c.api.model || '未选模型'),
-      open: true,
+      open: false,
       body: `
     <div class="field">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <label for="cfg-main-model-select">聊天模型</label>
+      <select id="cfg-main-model-select">${settingsModelOptions(c.api.provider,c.api.model)}</select>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
         <button class="btn" id="open-model-config-btn">⚙ 模型配置</button>
         <button class="btn" id="open-model-manage-btn">🗂 模型管理</button>
       </div>
@@ -402,7 +420,7 @@ function renderMemorySettingsSection(c) {
     <div id="mem-model-box" style="${useChat ? 'display:none' : ''}">
       <div class="field"><label>记忆整理模型（点击选择）</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="cfg-mem-model-pick" readonly placeholder="点击选择模型" value="${esc(currentDisplay)}" style="flex:1;cursor:pointer" />
+          <select id="cfg-mem-model-pick" style="flex:1">${settingsModelOptions(mem.provider,mem.model)}</select>
         </div>
         <div class="hint" id="mem-model-hint">${selP ? `当前：${esc(selP.displayName)} @ ${esc(selP.baseURL)}` : '尚未选择专用模型'}</div>
         <input type="hidden" id="cfg-mem-provider" value="${esc(mem.provider || '')}" />
@@ -492,8 +510,9 @@ function openGlobalPersonaModal() {
     head: '全局人设设置',
     body: `
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="text" id="gp-pick" readonly placeholder="点击选择人设" value="${esc(Object.values(state.personaTemplates || {}).find((p) => p.text === (per.roleText || ''))?.name || '')}" style="flex:1;cursor:pointer" />
+        <select id="gp-pick" style="flex:1">${personaTemplateOptions(Object.entries(state.personaTemplates || {}).find(([,p])=>p.text === (per.roleText || ''))?.[0] || '')}</select>
         <button class="btn btn-small" id="gp-new-btn">＋ 添加人设</button>
+        <button class="btn btn-small btn-danger" id="gp-delete-btn">删除所选人设</button>
       </div>
       <div class="field-row">
         <div class="field"><label>机器人名字</label><input type="text" id="gp-botname" value="${esc(per.botName || '')}" /></div>
@@ -517,36 +536,20 @@ function openGlobalPersonaModal() {
   });
 
   // 选择人设：与统一编辑器同一份模板列表
-  overlay.querySelector('#gp-pick').addEventListener('click', () => {
-    const entries = Object.entries(state.personaTemplates || {});
-    if (!entries.length) return;
-    const pickOverlay = modelModalShell({
-      head: '选择人设',
-      body: `<div class="model-modal-right" style="flex:1">
-        ${entries.map(([id, p]) => `
-          <div class="mm-model" data-id="${esc(id)}">
-            <span class="mm-check">${p.text === overlay.querySelector('#gp-roletext').value ? '✓' : ''}</span>
-            <span>${esc(p.name)}</span>
-            <span class="muted" style="font-size:11px">${p.builtin ? '内置' : '自定义'}</span>
-          </div>`).join('')}
-      </div>`,
-      foot: `<button class="btn" id="pp-cancel">取消</button>`
-    });
-    pickOverlay.querySelectorAll('.mm-model').forEach((el) => {
-      el.addEventListener('click', () => {
-        const tpl = state.personaTemplates[el.dataset.id];
-        if (tpl) {
-          overlay.querySelector('#gp-roletext').value = tpl.text;
-          overlay.querySelector('#gp-customrules').value = tpl.customRules || '';
-          overlay.querySelector('#gp-pick').value = tpl.name;
-        }
-        closeModelModal(pickOverlay);
-      });
-    });
-    pickOverlay.querySelector('#pp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
+  overlay.querySelector('#gp-pick').addEventListener('change', () => {
+    const tpl = state.personaTemplates[overlay.querySelector('#gp-pick').value];
+    if (tpl) { overlay.querySelector('#gp-roletext').value = tpl.text; overlay.querySelector('#gp-customrules').value = tpl.customRules || ''; }
+  });
+  overlay.querySelector('#gp-delete-btn').addEventListener('click', async () => {
+    try { if (await deletePersonaTemplate(overlay.querySelector('#gp-pick').value)) closeModelModal(overlay); }
+    catch(e) { alert(`删除人设失败：${e.message}`); }
   });
   overlay.querySelector('#gp-new-btn').addEventListener('click', () => {
-    openPersonaCreateModal();
+    openPersonaCreateModal(tpl => {
+      overlay.querySelector('#gp-pick').innerHTML = personaTemplateOptions(tpl.id);
+      overlay.querySelector('#gp-roletext').value = tpl.text;
+      overlay.querySelector('#gp-customrules').value = tpl.customRules || '';
+    });
   });
 
   overlay.querySelector('#gp-cancel').addEventListener('click', () => closeModelModal(overlay));
@@ -584,7 +587,7 @@ function openPerChatPersonaModal(chatKey) {
     head: `${chatName} 的独立人设`,
     body: `
       <div style="display:flex;gap:8px;margin-bottom:8px">
-        <input type="text" id="pcp-pick" readonly placeholder="点击选择人设" value="${esc(conf.roleText ? (Object.values(state.personaTemplates || {}).find((p) => p.text === conf.roleText)?.name || '自定义') : '')}" style="flex:1;cursor:pointer" />
+        <select id="pcp-pick" style="flex:1">${personaTemplateOptions(Object.entries(state.personaTemplates || {}).find(([,p])=>p.text === (conf.roleText || ''))?.[0] || '')}</select>
         <button class="btn btn-small" id="pcp-new-btn">＋ 添加人设</button>
       </div>
       <div class="field"><label>参与度（留空跟随全局）</label>
@@ -607,37 +610,17 @@ function openPerChatPersonaModal(chatKey) {
   });
 
   // 选择人设：复用人设模板列表
-  overlay.querySelector('#pcp-pick').addEventListener('click', () => {
-    const entries = Object.entries(state.personaTemplates || {});
-    if (!entries.length) return;
-    const pickOverlay = modelModalShell({
-      head: '选择人设',
-      body: `<div class="model-modal-right" style="flex:1">
-        ${entries.map(([id, p]) => `
-          <div class="mm-model" data-id="${esc(id)}">
-            <span class="mm-check">${p.text === overlay.querySelector('#pcp-roletext').value ? '✓' : ''}</span>
-            <span>${esc(p.name)}</span>
-            <span class="muted" style="font-size:11px">${p.builtin ? '内置' : '自定义'}</span>
-          </div>`).join('')}
-      </div>`,
-      foot: `<button class="btn" id="pp-cancel">取消</button>`
-    });
-    pickOverlay.querySelectorAll('.mm-model').forEach((el) => {
-      el.addEventListener('click', () => {
-        const tpl = state.personaTemplates[el.dataset.id];
-        if (tpl) {
-          overlay.querySelector('#pcp-roletext').value = tpl.text;
-          overlay.querySelector('#pcp-customrules').value = tpl.customRules || '';
-          overlay.querySelector('#pcp-pick').value = tpl.name;
-        }
-        closeModelModal(pickOverlay);
-      });
-    });
-    pickOverlay.querySelector('#pp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
+  overlay.querySelector('#pcp-pick').addEventListener('change', () => {
+    const tpl = state.personaTemplates[overlay.querySelector('#pcp-pick').value];
+    if (tpl) { overlay.querySelector('#pcp-roletext').value = tpl.text; overlay.querySelector('#pcp-customrules').value = tpl.customRules || ''; }
   });
   overlay.querySelector('#pcp-new-btn').addEventListener('click', () => {
     // 复用统一编辑器的添加流程：加完模板直接填进本会话的角色设定
-    openPersonaCreateModal();
+    openPersonaCreateModal(tpl => {
+      overlay.querySelector('#pcp-pick').innerHTML = personaTemplateOptions(tpl.id);
+      overlay.querySelector('#pcp-roletext').value = tpl.text;
+      overlay.querySelector('#pcp-customrules').value = tpl.customRules || '';
+    });
   });
 
   // 直接 POST 落盘：不走"写隐藏 JSON + 等表单链保存"的老路。
@@ -906,7 +889,7 @@ return `
         <button class="btn" id="ac-tier-params-btn" title="档位参数：各档条数 / 关键词表 / 被召唤后持续参与">⚙ 档位参数</button>
         <label class="switch" style="padding:0" title="开 = 所有群共用同一套档位 / 峰谷时段；关 = 每个群单独设置"><input type="checkbox" id="ac-unifiedtier" ${st.unifiedTier !== false ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span><span style="font-size:12px">统一设置</span></label>
       </span>`,
-      open: true,
+      open: false,
       body: `<div id="ac-editor"></div>`
     })}
 
@@ -1009,13 +992,7 @@ function renderDesktopSection(c) {
     ` : ''}
     <h3>界面</h3>
     <div class="field"><label>主题</label>
-      <div class="theme-picker" id="theme-picker">
-        ${['dark', 'light'].map((t) => `
-          <div class="theme-option${getThemePref() === t ? ' on' : ''}" data-theme-opt="${t}" role="button" tabindex="0">
-            <span class="t-ico">${THEME_ICON[t]}</span>
-            <span>${THEME_LABEL[t]}</span>
-          </div>`).join('')}
-      </div>
+      <select id="cfg-theme">${['dark','light'].map(t => `<option value="${t}" ${getThemePref() === t ? 'selected' : ''}>${THEME_LABEL[t]}</option>`).join('')}</select>
     </div>
     <div class="checkbox-row"><input type="checkbox" id="cfg-showvision" ${c.ui?.showVision !== false ? 'checked' : ''} />
       <label for="cfg-showvision">模型目录显示“支持图片输入/不支持图片输入”徽标</label></div>
@@ -1671,7 +1648,7 @@ function renderToolsSection(c) {
       icon: '🛠',
       title: '工具列表',
       sub: '按分类展开；开关即时保存',
-      open: true,
+      open: false,
       body: `
         <div class="checkbox-row">
           ${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统')}

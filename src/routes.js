@@ -372,7 +372,8 @@ export function createRoutes(deps) {
       method: 'GET', pattern: '/api/persona-templates',
       handler: async ({ res, json }) => {
         const { PERSONAS } = await import('./personas.js');
-        const builtins = Object.entries(PERSONAS).map(([id, p]) => ({ id, name: p.name, text: p.text, builtin: true }));
+        const hidden = new Set(getConfig().hiddenPersonaTemplates || []);
+        const builtins = Object.entries(PERSONAS).filter(([id]) => !hidden.has(id)).map(([id, p]) => ({ id, name: p.name, text: p.text, builtin: true }));
         const customs = (getConfig().customPersonas || []).map((p, i) => ({
           id: `custom_${i}`, name: p.name, text: p.text, customRules: p.customRules || '', builtin: false
         }));
@@ -394,11 +395,18 @@ export function createRoutes(deps) {
       }
     },
     {
-      method: 'DELETE', pattern: /^\/api\/persona-templates\/(custom_\d+)$/,
+      method: 'DELETE', pattern: /^\/api\/persona-templates\/([a-zA-Z0-9_-]+)$/,
       handler: async ({ res, json, match }) => {
-        const idx = Number(match[1].replace('custom_', ''));
-        const next = (getConfig().customPersonas || []).filter((_, i) => i !== idx);
-        updateConfig({ customPersonas: next });
+        const { PERSONAS } = await import('./personas.js');
+        const cfg = getConfig(), id = match[1];
+        const custom = /^custom_\d+$/.test(id);
+        const idx = custom ? Number(id.slice(7)) : -1;
+        const removed = custom ? cfg.customPersonas?.[idx] : PERSONAS[id];
+        if (!removed) return json(res,404,{ok:false,error:'人设不存在'});
+        const patch = custom ? { customPersonas:(cfg.customPersonas || []).filter((_,i)=>i!==idx) }
+          : { hiddenPersonaTemplates:[...new Set([...(cfg.hiddenPersonaTemplates || []),id])] };
+        if (cfg.persona?.roleText === removed.text) patch.persona = { roleText:'', customRules:'' };
+        updateConfig(patch);
         return json(res, 200, { ok: true });
       }
     },

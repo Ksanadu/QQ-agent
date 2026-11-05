@@ -512,7 +512,18 @@ function bindSettingsEvents(c) {
     }
   });
   const memModelPick = $('#cfg-mem-model-pick');
-  if (memModelPick) memModelPick.addEventListener('click', () => openMemoryModelPicker());
+  if (memModelPick) memModelPick.addEventListener('change', () => {
+    const [provider,model] = JSON.parse(memModelPick.value);
+    $('#cfg-mem-provider').value = provider; $('#cfg-mem-model').value = model;
+  });
+  $('#cfg-main-model-select')?.addEventListener('change', () => {
+    const [provider,model] = JSON.parse($('#cfg-main-model-select').value);
+    const p = (state.providers || []).find(p => p.id === provider);
+    $('#cfg-provider').value = provider; $('#cfg-model').value = model;
+    if (p) $('#cfg-baseurl-value').value = p.baseURL || '';
+    $('#cfg-model').dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  $('#cfg-theme')?.addEventListener('change', () => applyTheme($('#cfg-theme').value));
 
   // ── 模型 API 区块事件 ──
   // 密码框显示/隐藏切换（点击按钮切换对应输入框的 type）
@@ -887,7 +898,7 @@ function bindSettingsEvents(c) {
   function syncPersonaButtons(animate = true) {
     const id = currentPersonaId();
     const tpl = state.personaTemplates[id];
-    const isCustom = id.startsWith('custom_');
+    const isCustom = Boolean(id);
     const delBtn = $('#del-persona-btn');
     if (delBtn) {
       if (isCustom) uiShow(delBtn, () => delBtn.classList.remove('hidden'), animate);
@@ -897,28 +908,22 @@ function bindSettingsEvents(c) {
     if (hint) hint.textContent = tpl ? (tpl.builtin ? '内置人设' : '自定义人设') : '';
   }
   if (personaPick) {
-    personaPick.addEventListener('click', () => openPersonaPicker());
+    personaPick.addEventListener('change', () => {
+      const tpl = state.personaTemplates?.[personaPick.value];
+      if (!tpl) return;
+      $('#cfg-roletext').value = tpl.text;
+      $('#cfg-customrules').value = tpl.customRules || '';
+      $('#cfg-roletext').dispatchEvent(new Event('input', {bubbles:true}));
+      syncPersonaButtons(false);
+    });
   }
   const newPersonaBtn = $('#new-persona-btn');
   if (newPersonaBtn) newPersonaBtn.addEventListener('click', () => openPersonaCreateModal());
   const delPersonaBtn = $('#del-persona-btn');
   if (delPersonaBtn) delPersonaBtn.addEventListener('click', async () => {
-    const id = currentPersonaId();
-    if (!id.startsWith('custom_')) return;
-    const tpl = state.personaTemplates[id];
-    if (!tpl) return;
-    if (!(await uiConfirm(`确定删除自定义人设「${tpl.name}」？`))) return;
-    try {
-      await api(`/api/persona-templates/${id}`, { method: 'DELETE', body: '{}' });
-      $('#cfg-roletext').value = state.personaTemplates.xiaojingyu?.text || '';
-      $('#cfg-customrules').value = '';
-      // 删除 = 表单值被程序化改回默认人设：同样派发 input 触发自动保存，
-      // 否则"删完切走"后配置里还是被删掉的那套角色设定（保存从未发起）。
-      $('#cfg-roletext')?.dispatchEvent(new Event('input', { bubbles: true }));
-      await loadSettings();
-    } catch (e) {
-      $('#persona-pick-hint').textContent = `删除失败：${e.message}`;
-    }
+    const id = personaPick?.value || currentPersonaId();
+    try { await deletePersonaTemplate(id); }
+    catch (e) { $('#persona-pick-hint').textContent = `删除失败：${e.message}`; }
   });
   
   syncPersonaButtons(false);   // 初始装填不播动画（重渲染后是全新节点）

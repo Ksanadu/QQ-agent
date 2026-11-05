@@ -1026,13 +1026,14 @@ td b, .tbl td b { color: var(--tx); font-weight: 600; }
 .setcard-body.fold-body {
   display: grid; grid-template-rows: 0fr; opacity: 0;
   transition: grid-template-rows .22s ease, opacity .22s ease, padding-bottom .22s ease;
-  padding-bottom: 0;
+  padding: 0 17px;
 }
 .fold.open > .setcard-body.fold-body {
-  grid-template-rows: 1fr; opacity: 1; padding-bottom: 15px;
+  grid-template-rows: 1fr; opacity: 1; padding: 2px 17px 15px;
 }
 .fold-body > *, .setcard-body.fold-body > * { overflow: hidden; min-height: 0; }
-.fold-inner { border-top: 1px solid var(--bd); padding-top: 13px; }
+.fold-inner { border-top: 0; padding-top: 0; }
+.fold.open > .fold-body > .fold-inner { border-top: 1px solid var(--bd); padding-top: 13px; }
 .setrow {
   display: flex; align-items: center; gap: 14px; padding: 10px 0;
   border-bottom: 1px dashed var(--bd);
@@ -1534,7 +1535,7 @@ td b, .tbl td b { color: var(--tx); font-weight: 600; }
 @keyframes itemIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 @keyframes checkPop { 0% { transform: scale(.85); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
 @keyframes pageIn { from { opacity: 0; transform: translateY(var(--shift-sm)); } to { opacity: 1; transform: none; } }
-@keyframes slideInRight { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes slideInRight { from { opacity: 0; transform: translateX(17px); } to { opacity: 1; transform: none; } }
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @keyframes shimmer { 100% { transform: translateX(100%); } }
 @keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
@@ -1787,3 +1788,24 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
     scroll-behavior: auto !important;
   }
 }
+
+/* Native checkbox controls share the activity switch visual without changing events or labels. */
+body input[type="checkbox"]:not(.switch input) {
+  appearance: none; -webkit-appearance: none; position: relative; display: inline-block;
+  width: 40px; height: 23px; min-width: 40px; max-width: 40px; flex: 0 0 40px;
+  padding: 0; margin: 0; border: 1px solid var(--bd); border-radius: 999px;
+  background: var(--bd2); cursor: pointer; vertical-align: middle;
+  transition: background .15s ease; animation: none;
+}
+body input[type="checkbox"]:not(.switch input)::after {
+  content: ''; position: absolute; left: 2px; top: 2px; width: 17px; height: 17px;
+  border-radius: 50%; background: #fff; transition: transform .15s ease;
+}
+body input[type="checkbox"]:not(.switch input):checked { background: var(--ac); border-color: var(--ac); }
+body input[type="checkbox"]:not(.switch input):checked::after { transform: translateX(16px); }
+body input[type="checkbox"]:not(.switch input):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+body input[type="checkbox"]:not(.switch input):disabled { opacity: .5; cursor: default; }
+
+/* Shared dropdown surface, including persona and model dialogs. */
+select { color: var(--tx); background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--r-sm); padding: 9px 10px; min-width: 0; font: inherit; }
+select:focus-visible { outline: 2px solid var(--ac); outline-offset: 1px; }

@@ -114,6 +114,10 @@ function bindSetcardFolds(root) {
 /* 把一段 HTML 包成折叠设置卡。
    extra：卡头内 sc-tt（标题块）与 sc-val（右上角摘要）之间的自定义插槽
    （如「活跃设置」头部的"每个群聊单独设置"开关）。 */
+function settingsSectionIcon(title) {
+  const icons = [[/模型|API|渠道/,'🔑'],[/搜索/,'🔍'],[/记忆/,'🧠'],[/人设|角色/,'🎭'],[/白名单|允许/,'📋'],[/聊天|消息|活跃/,'💬'],[/界面|主题/,'🎨'],[/数据/,'🗂️'],[/更新/,'📦'],[/桌面|启动|系统/,'🖥️'],[/OneBot|SnowLuma|连接/,'🔌'],[/工具|技能|插件/,'🧰'],[/批准|安全/,'🛡️'],[/价格|费用|成本/,'💰']];
+  return icons.find(([match]) => match.test(title))?.[1] || '⚙️';
+}
 function setCard(opts) {
   const {
     id = '',
@@ -168,9 +172,9 @@ function autoFoldSettings(root) {
     if (!group) return;
     const body = group;
     const title = groupTitle || pageTitle || '设置项';
-    const icon = groupIcon;
+    const icon = groupIcon === '⚙' ? settingsSectionIcon(title) : groupIcon;
     const gray = groupGray;
-    const open = segIdx === 0;
+    const open = false;
     const wrap = document.createElement('div');
     wrap.innerHTML = setCard({ icon, gray, title, body: '', open });
     const card = wrap.firstElementChild;

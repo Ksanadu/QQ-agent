@@ -206,7 +206,7 @@ function openPersonaPicker() {
 }
 
 /** 添加人设：弹窗填写人设名称、角色设定、管理员附加规则。 */
-function openPersonaCreateModal() {
+function openPersonaCreateModal(onCreated = null) {
   const overlay = modelModalShell({
     head: '添加人设',
     body: `
@@ -230,27 +230,22 @@ function openPersonaCreateModal() {
     const name = overlay.querySelector('#new-persona-name').value.trim();
     const text = overlay.querySelector('#new-persona-text').value.trim();
     const customRules = overlay.querySelector('#new-persona-rules').value.trim();
-    if (!name) { $('#persona-pick-hint').textContent = '人设名称不能为空'; return; }
-    if (!text) { $('#persona-pick-hint').textContent = '角色设定不能为空'; return; }
+    if (!name) { overlay.querySelector('#new-persona-name').focus(); return; }
+    if (!text) { overlay.querySelector('#new-persona-text').focus(); return; }
     try {
       await api('/api/persona-templates', {
         method: 'POST',
         body: JSON.stringify({ name, text, customRules })
       });
+      const response = await api('/api/persona-templates');
+      state.personaTemplates = Object.fromEntries((response.templates || []).map(p => [p.id,p]));
+      const entry = Object.values(state.personaTemplates).find(p => p.name === name && p.text === text);
+      if (onCreated) onCreated(entry);
+      else await api('/api/config',{method:'POST',body:JSON.stringify({persona:{roleText:text,customRules}})});
       closeModelModal(overlay);
-      $('#cfg-roletext').value = text;
-      $('#cfg-customrules').value = customRules;
-      const input = $('#cfg-persona-pick');
-      if (input) input.value = name;
-      // 同 openPersonaPicker：程序化赋值不触发 input 事件，自动保存不会启动 ——
-      // 主动派发一次，否则"添加完人设切走页签"就丢（保存从未发起）。
-      $('#cfg-roletext')?.dispatchEvent(new Event('input', { bubbles: true }));
       await loadSettings();
-      // loadSettings 会重渲染整个表单；重渲染用的是 state.config（含刚派发
-      // 事件触发的自动保存最终值）。自动保存在途时渲染守卫会拦下并补绘，不会丢。
-      $('#persona-pick-hint').textContent = `人设「${name}」已添加并填入表单，自动保存稍后生效（也可切走页签前确认）。`;
     } catch (e) {
-      $('#persona-pick-hint').textContent = `添加失败：${e.message}`;
+      alert(`添加失败：${e.message}`);
     }
   });
 }
@@ -274,9 +269,9 @@ function openModelConfigModal() {
   const overlay = modelModalShell({
     head: '模型配置',
     body: `
-      <div class="field"><label>模型目录（点击选择）</label>
+      <div class="field"><label>模型目录</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="mc-model-pick" readonly placeholder="点击选择模型" value="${esc(currentProvider ? ((currentProvider.modelNames || {})[c.api.model] || c.api.model || '') : '')}" style="flex:1;cursor:pointer" />
+          <select id="mc-model-pick" style="flex:1">${settingsModelOptions(c.api.provider,c.api.model)}</select>
           <button class="btn btn-small" id="mc-test-btn">测试连通性</button>
         </div>
         <div class="hint" id="mc-test-result" style="margin-top:4px"></div></div>
@@ -298,12 +293,12 @@ function openModelConfigModal() {
       <div class="field-row">
         <div class="field"><label>图片输入专用模型（留空用主模型）</label>
           <div style="display:flex;gap:8px">
-            <input type="text" id="mc-vision-model-pick" readonly placeholder="点击选择" value="${esc(displayOf(c.api?.visionModel))}" style="flex:1;cursor:pointer" />
+            <select id="mc-vision-model-pick" style="flex:1">${settingsSpecialModelOptions(c.api?.visionModel || '')}</select>
             <button class="btn btn-small" id="mc-vision-model-clear" type="button">清空</button>
           </div></div>
         <div class="field"><label>视频输入专用模型（留空用主模型）</label>
           <div style="display:flex;gap:8px">
-            <input type="text" id="mc-video-model-pick" readonly placeholder="点击选择" value="${esc(displayOf(c.api?.videoModel))}" style="flex:1;cursor:pointer" />
+            <select id="mc-video-model-pick" style="flex:1">${settingsSpecialModelOptions(c.api?.videoModel || '')}</select>
             <button class="btn btn-small" id="mc-video-model-clear" type="button">清空</button>
           </div></div>
       </div>
@@ -340,50 +335,17 @@ function openModelConfigModal() {
   });
 
   // 模型选择：复用主模型选择器语义，但选完只写本弹窗的表单（不立即 POST）
-  overlay.querySelector('#mc-model-pick').addEventListener('click', () => {
-    const providers = state.providers || [];
-    if (!providers.length) { alert('模型目录为空：请先用「模型管理」添加提供商。'); return; }
-    const pickOverlay = modelModalShell({
-      head: '选择模型',
-      body: `
-        <div class="model-modal-left" id="mcp-left"></div>
-        <div class="model-modal-right" id="mcp-right"></div>`,
-      foot: `<button class="btn" id="mcp-cancel">取消</button>`
-    });
-    const pl = pickOverlay.querySelector('#mcp-left');
-    const pr = pickOverlay.querySelector('#mcp-right');
-    let activePid = c.api?.provider || providers[0].id;
-    const renderLeft = () => {
-      pl.innerHTML = providers.map((p) =>
-        `<div class="mm-prov ${p.id === activePid ? 'active' : ''}" data-pid="${esc(p.id)}">${esc(p.displayName || p.id)}</div>`).join('');
-      pl.querySelectorAll('.mm-prov').forEach((el) => el.addEventListener('click', () => { activePid = el.dataset.pid; renderLeft(); renderRight(); }));
-    };
-    const renderRight = () => {
-      const p = providers.find((x) => x.id === activePid);
-      if (!p) { pr.innerHTML = ''; return; }
-      const names = p.modelNames || {};
-      pr.innerHTML = p.models.map((m) => `
-        <div class="mm-model" data-model="${esc(m)}">
-          <span>${esc(names[m] || m)}</span>${visionBadge(activePid, m)}
-          <span class="muted" style="font-size:11px">${esc(m)}</span>
-        </div>`).join('') || '<div class="muted" style="padding:10px">该提供商下没有模型</div>';
-      pr.querySelectorAll('.mm-model').forEach((el) => el.addEventListener('click', () => {
-        const previousPid = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api?.provider;
-        if (previousPid !== activePid) {
-          const keyInput = overlay.querySelector('#mc-apikey');
-          keyInput.value = p.hasKey ? '******' : '';
-          keyInput.type = 'password';
-          overlay.querySelector('#mc-apikey-toggle').textContent = '显示';
-        }
-        overlay.querySelector('#mc-model-pick').value = (names[el.dataset.model] || el.dataset.model);
-        overlay.querySelector('#mc-picked').value = `${activePid}|||${el.dataset.model}`;
-        overlay.querySelector('#mc-baseurl').value = p.baseURL || '';
-        closeModelModal(pickOverlay);
-      }));
-    };
-    renderLeft();
-    renderRight();
-    pickOverlay.querySelector('#mcp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
+  overlay.querySelector('#mc-model-pick').addEventListener('change', () => {
+    const [pid,model] = JSON.parse(overlay.querySelector('#mc-model-pick').value);
+    const p = (state.providers || []).find(p => p.id === pid);
+    const previous = overlay.querySelector('#mc-picked').value.split('|||')[0] || c.api.provider;
+    if (p && pid !== previous) {
+      overlay.querySelector('#mc-apikey').value = p.hasKey ? '******' : '';
+      overlay.querySelector('#mc-apikey').type = 'password';
+      overlay.querySelector('#mc-apikey-toggle').textContent = '显示';
+    }
+    overlay.querySelector('#mc-picked').value = pid + '|||' + model;
+    if (p) overlay.querySelector('#mc-baseurl').value = p.baseURL || '';
   });
   // 隐藏字段：选中模型的 pid|||model（未选择时为空 = 保持现状）
   const hidden = document.createElement('input');
@@ -391,47 +353,10 @@ function openModelConfigModal() {
   hidden.id = 'mc-picked';
   overlay.querySelector('.model-modal-body').appendChild(hidden);
 
-  // 专用模型选择（写隐藏字段，保存时带走）
-  const pickSpecial = (which) => {
-    const providers = state.providers || [];
-    if (!providers.length) { alert('模型目录为空。'); return; }
-    const fieldId = which === 'vision' ? 'mc-vision-model-pick' : 'mc-video-model-pick';
-    const pickOverlay = modelModalShell({
-      head: which === 'vision' ? '选择图片输入模型' : '选择视频输入模型',
-      body: `
-        <div class="model-modal-left" id="msp-left"></div>
-        <div class="model-modal-right" id="msp-right"></div>`,
-      foot: `<button class="btn" id="msp-cancel">取消</button>`
-    });
-    const pl = pickOverlay.querySelector('#msp-left');
-    const pr = pickOverlay.querySelector('#msp-right');
-    let activePid = providers[0].id;
-    const renderLeft = () => {
-      pl.innerHTML = providers.map((p) =>
-        `<div class="mm-prov ${p.id === activePid ? 'active' : ''}" data-pid="${esc(p.id)}">${esc(p.displayName || p.id)}</div>`).join('');
-      pl.querySelectorAll('.mm-prov').forEach((el) => el.addEventListener('click', () => { activePid = el.dataset.pid; renderLeft(); renderRight(); }));
-    };
-    const renderRight = () => {
-      const p = providers.find((x) => x.id === activePid);
-      if (!p) { pr.innerHTML = ''; return; }
-      const names = p.modelNames || {};
-      pr.innerHTML = p.models.map((m) => `
-        <div class="mm-model" data-model="${esc(m)}">
-          <span>${esc(names[m] || m)}</span>${visionBadge(activePid, m)}
-          <span class="muted" style="font-size:11px">${esc(m)}</span>
-        </div>`).join('') || '<div class="muted" style="padding:10px">该提供商下没有模型</div>';
-      pr.querySelectorAll('.mm-model').forEach((el) => el.addEventListener('click', () => {
-        overlay.querySelector('#' + fieldId).value = (names[el.dataset.model] || el.dataset.model);
-        overlay.querySelector('#' + fieldId).dataset.model = el.dataset.model;
-        closeModelModal(pickOverlay);
-      }));
-    };
-    renderLeft();
-    renderRight();
-    pickOverlay.querySelector('#msp-cancel').addEventListener('click', () => closeModelModal(pickOverlay));
-  };
-  overlay.querySelector('#mc-vision-model-pick').addEventListener('click', () => pickSpecial('vision'));
-  overlay.querySelector('#mc-video-model-pick').addEventListener('click', () => pickSpecial('video'));
+  for (const which of ['vision','video']) {
+    const select = overlay.querySelector('#mc-' + which + '-model-pick');
+    select.addEventListener('change', () => { select.dataset.model = select.value; });
+  }
   overlay.querySelector('#mc-vision-model-clear').addEventListener('click', () => {
     const el = overlay.querySelector('#mc-vision-model-pick');
     el.value = ''; delete el.dataset.model;

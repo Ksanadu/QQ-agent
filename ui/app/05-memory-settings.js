@@ -740,9 +740,9 @@ function renderPersonaPicker(c) {
       <div class="field">
         <label>选择人设</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input type="text" id="cfg-persona-pick" class="inp persona-pick" readonly placeholder="点击选择人设" value="${esc(currentName)}" style="flex:1;min-width:160px;cursor:pointer" />
+          <select id="cfg-persona-pick" style="flex:1;min-width:160px">${personaTemplateOptions(currentId)}</select>
           <button class="btn btn-small" id="new-persona-btn">＋ 添加人设</button>
-          <button class="btn btn-small btn-danger hidden" id="del-persona-btn">删除当前自定义人设</button>
+          <button class="btn btn-small btn-danger" id="del-persona-btn">删除所选人设</button>
         </div>
         <span id="persona-pick-hint" class="muted" style="font-size:12px"></span>
       </div>
@@ -785,3 +785,15 @@ function renderHealthCard() {
 }
 
 // 人设模板数据：state.personaTemplates（由 loadSettings 从后端填充）
+
+function personaTemplateOptions(selected = '') {
+  return '<option value="">选择人设</option>' + Object.entries(state.personaTemplates || {}).map(([id,p]) =>
+    `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+}
+async function deletePersonaTemplate(id) {
+  const tpl = state.personaTemplates?.[id];
+  if (!tpl || !(await uiConfirm(`确定删除人设「${tpl.name}」？`))) return false;
+  await api('/api/persona-templates/' + encodeURIComponent(id), {method:'DELETE',body:'{}'});
+  await loadSettings();
+  return true;
+}
