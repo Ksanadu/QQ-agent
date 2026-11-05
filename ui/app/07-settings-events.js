@@ -330,6 +330,10 @@ function bindSettingsEvents(c) {
   });
 
   // 搜索提供方切换
+  $('#cfg-ag-searchprovider')?.addEventListener('change', () => {
+    const select = $('#cfg-ag-searchmodel');
+    if (select) select.innerHTML = googleSearchModelOptions(state.config, $('#cfg-ag-searchprovider').value, select.value);
+  });
   const searchProviderSel = $('#cfg-searchprovider');
   if (searchProviderSel) searchProviderSel.addEventListener('change', () => {
     const v = searchProviderSel.value;

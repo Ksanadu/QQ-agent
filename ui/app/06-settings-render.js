@@ -260,11 +260,22 @@ function renderApiSection(c) {
 }
 
 
+function googleSearchModelOptions(c, providerId, selected) {
+  const providers = state.providers?.length ? state.providers : (c.providers || []);
+  const provider = providers.find(p => p.id === providerId);
+  const models = [...new Set((provider?.models || []).map(m => typeof m === 'string' ? m : m.id)
+    .filter(id => /^gemini-[a-zA-Z0-9._-]+$/.test(id) && !/image/i.test(id)))];
+  // 保留已保存但暂未收录的模型，避免渲染或切换提供商时静默改写配置。
+  if (selected && !models.includes(selected)) models.unshift(selected);
+  return models.map(id => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(id)}</option>`).join('');
+}
+
 function renderSearchSection(c) {
   // 每个提供方区块的初始显隐都要跟当前 provider 一致
   const prov = String(c.webSearch?.provider || 'bing');
   // 自定义搜索提供商列表（可多个），用于动态生成下拉框选项
   const customProvs = Array.isArray(c.webSearch?.providers) ? c.webSearch.providers : [];
+  const modelProviders = state.providers?.length ? state.providers : (c.providers || []);
   return `
     <h3 id="settings-search">搜索服务</h3>
     <div class="hint" style="margin-bottom:12px">
@@ -317,9 +328,9 @@ function renderSearchSection(c) {
     <div id="antigravity-search-fields" style="${prov === 'antigravity' ? '' : 'display:none'}">
       <div class="field-row">
         <div class="field"><label>Antigravity 模型提供商</label><select id="cfg-ag-searchprovider">
-          ${(c.providers || []).map(p => `<option value="${esc(p.id)}" ${p.id === (c.webSearch?.antigravity?.providerId || 'antigravity') ? 'selected' : ''}>${esc(p.displayName || p.id)}</option>`).join('')}
+          ${modelProviders.map(p => `<option value="${esc(p.id)}" ${p.id === (c.webSearch?.antigravity?.providerId || 'antigravity') ? 'selected' : ''}>${esc(p.displayName || p.id)}</option>`).join('')}
         </select></div>
-        <div class="field"><label>Google 搜索使用的 Gemini 模型</label><input type="text" id="cfg-ag-searchmodel" value="${esc(c.webSearch?.antigravity?.model || 'gemini-3.8-flash-medium')}" /></div>
+        <div class="field"><label for="cfg-ag-searchmodel">Google 搜索使用的 Gemini 模型</label><select id="cfg-ag-searchmodel">${googleSearchModelOptions(c, c.webSearch?.antigravity?.providerId || 'antigravity', c.webSearch?.antigravity?.model || 'gemini-3.8-flash-medium')}</select></div>
       </div>
       <div class="hint">该连接需要支持原生 Gemini 接口与 Google 搜索。单独请求并返回搜索来源，会消耗所选 Gemini 模型额度；未返回真实来源时明确报错，不回退到 Bing。</div>
     </div>
