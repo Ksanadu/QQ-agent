@@ -2,7 +2,6 @@
 // （原版经 @snowluma/sdk 收事件；这里直接实现标准 OneBot v11，去掉 SDK 补丁依赖。）
 import WebSocket from 'ws';
 import { transcribeQQVoice } from './qq-speech.js';
-import { assertProtectedAction } from './protected-actions.js';
 import { sanitizeUserText, escapeCqText } from './util.js';
 import { skillManager } from './skills/manager.js';
 import { DeliveryVerifier } from './delivery-verification.js';
@@ -281,7 +280,6 @@ export class OneBotClient {
   }
 
   async #callHttp(action, params = {}, timeoutMs = null) {
-    assertProtectedAction(action, params);
     // ── 超时按 action 分档（这里修过一个真实故障）──────────────────────────
     // 原来一律 15 秒。查询类够用，但**发送类不够**：图片/视频以 base64 或大 body
     // 发出去时，协议端要走完「接收 body → 解码 → 上传腾讯服务器 → 返回」，

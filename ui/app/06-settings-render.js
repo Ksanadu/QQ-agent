@@ -34,18 +34,6 @@ function visionVerdictOf(providerId, model) {
 
 
 
-function renderActionApprovalsSection(c) {
-  return `<div class="setcard"><h3>表情删除批准</h3>
-    <p class="hint">机器人只能提出待删清单。在此批准后才会删除 QQ 收藏；删除不可恢复。</p>
-    <div class="field"><label for="approval-admins">允许在 QQ 确认的管理员 QQ 号</label>
-      <textarea id="approval-admins" rows="2">${esc((c.security?.adminUserIds || []).join(', '))}</textarea>
-      <div class="hint">多个号码以逗号分隔。留空时只能在此控制台批准。QQ 确认必须由请求本人发送“确认删除 操作码”。</div></div>
-    <button class="btn" id="approval-admin-save" type="button">保存管理员</button>
-    <button class="btn" id="approval-refresh" type="button">刷新待批准操作</button>
-    <p id="approval-status" class="hint" aria-live="polite"></p>
-    <div id="approval-list" aria-live="polite">正在读取…</div></div>`;
-}
-
 function renderSettingsSidebar() {
   const s = state.status;
   const sidebar = $('#settings-sidebar');
@@ -53,14 +41,10 @@ function renderSettingsSidebar() {
   const menu = [
     ['api', '模型 API'],
     ['search', '搜索服务'],
-    ['memory', '记忆'],
-    ['persona', '人设'],
-    ['allow', '聊天白名单'],
+    ['memory', '记忆与人设'],
     ['chat', '聊天设置'],
     ['desktop', '界面与系统'],
-    ['onebot', 'OneBot（SnowLuma）'],
-    ['tools', '工具与技能'],
-    ['approvals', '操作批准']
+    ['tools', '工具与技能']
   ];
   sidebar.innerHTML = `
     <div class="settings-runstate">
@@ -116,6 +100,7 @@ function renderSettings() {
     };
   })();
   const c = state.config;
+  state.settingsSection = ({ persona: 'memory', allow: 'chat', onebot: 'desktop', approvals: 'api' })[state.settingsSection] || state.settingsSection;
   renderSettingsSidebar();
   try {
     box.innerHTML = `
@@ -156,18 +141,17 @@ function renderSettingsSection(c) {
   const sections = {
     api: () => renderApiSection(c),
     search: () => renderSearchSection(c),
-    memory: () => renderMemorySettingsSection(c),
-    persona: () => renderPersonaSection(c),
-    allow: () => renderAllowSection(c),
-    chat: () => renderChatSection(c),
-    desktop: () => renderDesktopSection(c),
-    onebot: () => renderOnebotSection(c),
-    tools: () => renderToolsSection(c),
-    approvals: () => renderActionApprovalsSection(c)
+    memory: () => `<h3>记忆与人设</h3>${settingsSectionCard(renderMemorySettingsSection(c), { id: 'card-memory', title: '记忆', icon: '🧠', open: true })}${settingsSectionCard(renderPersonaSection(c), { id: 'card-persona', title: '人设', icon: '🎭', open: true })}`,
+    chat: () => renderChatSection(c) + settingsSectionCard(renderAllowSection(c), { id: 'settings-allow', title: '白名单', icon: '📋' }),
+    desktop: () => renderDesktopSection(c) + renderOnebotSection(c),
+    tools: () => renderToolsSection(c)
   };
   const render = sections[sec] || sections.api;
   return `
     ${render()}`;
+}
+function settingsSectionCard(html, options) {
+  return setCard({ ...options, body: html.replace(/<h3\b[^>]*>[\s\S]*?<\/h3>/, '') });
 }
 function settingsModelOptions(provider, model) {
   const selected = JSON.stringify([provider || '', model || '']);
@@ -209,7 +193,7 @@ function renderApiSection(c) {
       title: '模型与渠道',
       sub: '提供商 / 模型 / BaseURL',
       val: esc(c.api.model || '未选模型'),
-      open: false,
+      open: true,
       body: `
     <div class="field">
       <label for="cfg-main-model-select">聊天模型</label>
@@ -493,7 +477,7 @@ function renderPersonaSection(c) {
       <div class="field" style="margin-bottom:10px">
         <button class="btn" id="open-global-persona-btn">⚙ 全局人设设置（未单独配置的会话用这套）</button>
       </div>
-      <div class="persona-chat-grid">${chatButtons || '<div class="hint">（白名单为空——先在「聊天白名单」里添加群聊/私聊）</div>'}</div>
+      <div class="persona-chat-grid">${chatButtons || '<div class="hint">（白名单为空——先在「白名单」里添加群聊/私聊）</div>'}</div>
     </div>`;
 }
 
@@ -673,7 +657,7 @@ function openPerChatPersonaModal(chatKey) {
 
 function renderAllowSection(c) {
   return `
-    <h3 id="settings-allow">聊天白名单</h3>
+    <h3 id="settings-allow">白名单</h3>
     <div class="hint" style="margin-bottom:10px">白名单为空时机器人不会在任何群聊/私聊内运行。</div>
     <div class="field"><label>从 QQ 账号直接勾选</label>
       <div class="allow-pick-row">
@@ -688,7 +672,7 @@ function renderAllowSection(c) {
     <div class="checkbox-row"><input type="checkbox" id="cfg-allowallwhenempty" ${c.allowAllWhenEmpty === true ? 'checked' : ''} />
       <label for="cfg-allowallwhenempty">白名单留空时允许所有会话</label></div>
     <div class="hint">说明：勾选后，若上方两个列表都为空，机器人会在<b>所有</b>群聊和私聊中运行；只要填了任意一项，就只按名单过滤。</div>
-    <div class="hint" style="margin-top:8px">按会话的独立人设在「人设」页签配置（关闭"统一人设"后出现）。</div>`;
+    <div class="hint" style="margin-top:8px">按会话的独立人设在「记忆与人设」中配置（关闭"统一人设"后出现）。</div>`;
 }
 
 // 表情包积极程度档位：[值, 显示名]
@@ -1576,16 +1560,12 @@ function renderToolsSection(c) {
     byCategory[t.category].push(t);
   }
 
-  // 渐进式披露：默认折叠，点击展开
-  const expandedCategories = state.expandedToolCategories || new Set(['messaging']); // 默认展开第一个
-
   const categoryCards = categories.map((cat) => {
     const catTools = byCategory[cat] || [];
     if (!catTools.length) return '';
     const catEnabled = toolsCfg.categories?.[cat] !== false;
-    const isExpanded = expandedCategories.has(cat);
 
-    const toolCards = isExpanded ? catTools.map((t) => {
+    const toolCards = catTools.map((t) => {
       const enabled = toolsCfg.overrides?.[t.id] ?? t.defaultEnabled ?? true;
       const disabledByDep = (t.requiresVision && c.api?.vision === false) || (t.requiresSearch && c.webSearch?.enabled === false);
       // 功能名字 + 一句话概括（description 可能缺失，不能直接 .split）
@@ -1616,50 +1596,27 @@ function renderToolsSection(c) {
             ${isSendTo ? '<span class="tool-dep">目标须在白名单内</span>' : ''}
           </div>
         </div>`;
-    }).join('') : '';
+    }).join('');
 
-    return `
-      <div class="tool-category ${isExpanded ? 'expanded' : 'collapsed'}" data-category="${cat}">
-        <div class="tool-category-header" data-category="${cat}" role="button" tabindex="0">
-          <span class="tool-category-arrow">${isExpanded ? '▼' : '▶'}</span>
-          <span class="tool-category-name">${categoryNames[cat] || cat}</span>
-          <label class="tool-category-toggle switch" onclick="event.stopPropagation()">
-            <input type="checkbox" class="category-checkbox" data-category="${cat}" ${catEnabled ? 'checked' : ''} />
-            <span class="track"><span class="thumb"></span></span>
-          </label>
-          <span class="tool-category-count">${catTools.length} 个工具</span>
-        </div>
-        ${isExpanded ? `<div class="tool-list">${toolCards}</div>` : ''}
-      </div>`;
+    const name = categoryNames[cat] || cat;
+    const [icon, ...label] = name.split(' ');
+    return setCard({
+      id: `card-tools-${cat}`, icon, title: label.join(' ') || cat,
+      val: `${catTools.length} 个工具`,
+      extra: `<label class="switch"><input type="checkbox" class="category-checkbox" data-category="${cat}" ${catEnabled ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>`,
+      body: `<div class="tool-list">${toolCards}</div>`
+    });
   }).join('');
 
-  // ⚠️ 必须落在顶层 setCard 里：renderSettingsSection 直接嵌这一段时，
-  // autoFoldSettings 会按 h3 把整页重包成折叠卡，再把 .fold-head 绑到
-  // 分类头上 —— 点分类会开合整块面板，grid-rows 折叠把下半屏撑出大片空白。
-  const fold = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
   return `
     <h3 id="settings-tools">工具与技能</h3>
-    <div class="hint" style="margin-bottom:12px">
-      打开开关启用机器人可调用的工具。关闭后模型将无法使用该功能。
-      ${toolsCfg.enabled === false ? '<span style="color:var(--red)">⚠️ 全局开关已关闭，所有工具均不可用</span>' : ''}
+    <div class="checkbox-row">${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统')}</div>
+    <div class="tool-actions" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn btn-small" id="tools-enable-all">全部启用</button>
+      <button type="button" class="btn btn-small" id="tools-disable-all">全部禁用</button>
+      <button type="button" class="btn btn-small" id="tools-reset">恢复默认</button>
     </div>
-    ${fold({
-      id: 'card-tools-list',
-      icon: '🛠',
-      title: '工具列表',
-      sub: '按分类展开；开关即时保存',
-      open: false,
-      body: `
-        <div class="checkbox-row">
-          ${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统')}
-        </div>
-        <div class="tool-actions" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-small" id="tools-enable-all">全部启用</button>
-          <button class="btn btn-small" id="tools-disable-all">全部禁用</button>
-          <button class="btn btn-small" id="tools-reset">恢复默认</button>
-        </div>
-        ${categoryCards || '<div class="hint">（还没有注册任何工具）</div>'}`
-    })}`;
+    ${categoryCards || '<div class="hint">（还没有注册任何工具）</div>'}`;
 }
 
 /**

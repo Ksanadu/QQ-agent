@@ -174,7 +174,7 @@ function autoFoldSettings(root) {
     const title = groupTitle || pageTitle || '设置项';
     const icon = groupIcon === '⚙' ? settingsSectionIcon(title) : groupIcon;
     const gray = groupGray;
-    const open = false;
+    const open = segIdx === 0 && ['api', 'search'].includes(state.settingsSection || 'api');
     const wrap = document.createElement('div');
     wrap.innerHTML = setCard({ icon, gray, title, body: '', open });
     const card = wrap.firstElementChild;

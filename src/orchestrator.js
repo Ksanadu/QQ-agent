@@ -27,7 +27,7 @@ import { ImageAlbum } from './image-album.js';
 import { beginReplyCompletion, hasSendMessageDelivery, DELIVERY_REQUIRED } from './reply-completion.js';
 
 export class Orchestrator {
-  constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null, approvals = null }) {
+  constructor({ store, memory, stickers, sender, sessions, onebot, emit = null, reminders = null, videoReader = null }) {
     this.store = store;
     this.tasks = new ConversationTasks();
     this.imageAlbum = new ImageAlbum();
@@ -37,7 +37,6 @@ export class Orchestrator {
     this.sessions = sessions;
     this.onebot = onebot;
     this.reminders = reminders;   // ReminderStore（可选；闹钟/计时功能）
-    this.approvals = approvals;
     this.videoReader = videoReader; // VideoReader（可选；视频读取功能）
     // 事件出口：正常情况下由 app.js 注入（转发到 SSE）。
     // 兜底必须是**明确的 no-op** —— 早先用 createEventBus() 兜底，
@@ -995,7 +994,6 @@ export class Orchestrator {
       memory: this.memory,
       stickers: this.stickers,
       sender: this.sender.forSession?.(session, this.emit, { reactionMessages }) || this.sender,
-      actions: this.approvals?.forSession(session, triggerEntries),
       session,
       reminders: this.reminders,
       videoReader: this.videoReader,

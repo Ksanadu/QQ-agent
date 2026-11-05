@@ -86,16 +86,6 @@ export function createRoutes(deps) {
   };
 
   return [
-    { method: 'GET', pattern: '/api/action-approvals', handler: async ({ res, json }) => json(res, 200, { operations: deps.approvals.list() }) },
-    { method: 'POST', pattern: /^\/api\/action-approvals\/([A-F0-9]{10})\/(approve|cancel)$/,
-      handler: async ({ req, res, json, match }) => {
-        await bodyOf(req);
-        try {
-          const operation = match[2] === 'approve' ? await deps.approvals.approve(match[1], { via: 'console' }) : deps.approvals.cancel(match[1]);
-          return json(res, 200, { operation });
-        } catch (error) { return json(res, 409, { error: error.message }); }
-      }
-    },
     // ── 状态 / 数据目录 / 重置 ─────────────────────────────────────────
     {
       method: 'GET', pattern: '/api/status',

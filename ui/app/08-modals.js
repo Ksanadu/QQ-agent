@@ -1307,7 +1307,7 @@ async function saveConfig({ quiet = false } = {}) {
     };
   }
 
-  if (sec === 'persona') {
+  if (sec === 'memory' || sec === 'persona') {
     patch.persona = {
       botName: val('#cfg-botname', c.persona.botName).trim() || '小鲸鱼',
       selfNickname: val('#cfg-selfnick', c.persona.selfNickname || '').trim(),
@@ -1326,7 +1326,7 @@ async function saveConfig({ quiet = false } = {}) {
     //    personaByChat 条目不参与合并（数据保留，关掉开关后恢复生效）。
   }
 
-  if (sec === 'allow') {
+  if (sec === 'chat' || sec === 'allow') {
     patch.allow = {
       groups: parseList(val('#cfg-allowgroups', (c.allow?.groups || []).join(','))),
       private: parseList(val('#cfg-allowprivate', (c.allow?.private || []).join(',')))
@@ -1428,7 +1428,7 @@ async function saveConfig({ quiet = false } = {}) {
     // 「成员备注」模态框（直接 POST 增量 patch），这里不写 = deepMerge 保留现值。
   }
 
-  if (sec === 'onebot') {
+  if (sec === 'desktop' || sec === 'onebot') {
     // ⚠️ 令牌是脱敏回传的（值是 ******，真实值只在后端）：
     //    留空 / ****** = 保持原值不变；只有输入了新明文才更新。
     //    曾经直接把输入框的值（脱敏后为空）写进 patch，

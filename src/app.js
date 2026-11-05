@@ -2,7 +2,6 @@
 // Electron 主进程与 headless 服务器都从这里启动。
 import http from 'node:http';
 import { chatAllowed } from './chat-policy.js';
-import { ActionApprovals } from './action-approvals.js';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -643,7 +642,6 @@ export function createApp({ log = console.log } = {}) {
     onEvent: (event) => handleOneBotEvent(event).catch((error) => log('[ingest] 处理事件出错:', error?.message ?? error))
   });
   const stickers = new StickerManager(onebot);
-  const approvals = new ActionApprovals({ onebot, stickers, emit });
   const sender =   new SendQueue({
     onebot, store,
     onSent: ({ chatKey, text }) => log(`[发送 -> ${chatKey}] ${String(text).slice(0, 60)}`),
@@ -651,7 +649,7 @@ export function createApp({ log = console.log } = {}) {
   });
   const reminders = new ReminderStore();
   const videoReader = new VideoReader(onebot);
-  const orchestrator = new Orchestrator({ store, memory, stickers, sender, sessions, onebot, emit, reminders, videoReader, approvals });
+  const orchestrator = new Orchestrator({ store, memory, stickers, sender, sessions, onebot, emit, reminders, videoReader });
 
   // 远程价格表固定为官网公开地址；不从用户配置读取，避免被页面/配置篡改。
   initPriceFeed(FIXED_PRICE_FEED_URL);
@@ -898,19 +896,6 @@ export function createApp({ log = console.log } = {}) {
     }
 
     if (!text && !media.length) return;
-
-    // Confirmations are parsed from the actual sender and plain message, never by the model.
-    const plainConfirmation = !segments || segments.every((seg) => seg.type === 'text' || (seg.type === 'at' && String(seg.data?.qq) === String(onebot.selfId)));
-    const confirmationText = segments ? segments.filter((seg) => seg.type === 'text').map((seg) => seg.data?.text || '').join('') : text;
-    if (plainConfirmation && /^确认删除\s+[A-F0-9]{10}$/.test(confirmationText.trim())) {
-      try {
-        const result = await approvals.confirmFromEvent({ actorId: senderId, chatKey: `${kind}:${id}`, text: confirmationText, plain: true });
-        log(`[approval] ${result.id} ${result.status}`);
-        const deleted = result.results.filter((item) => item.deleted).length;
-        await sender.sendTextBatch(`${kind}:${id}`, [`已删除 ${deleted} 张表情${result.status === 'partial' ? '，部分未成功，请到控制台查看原因' : ''}。`]);
-      } catch (error) { log(`[approval] 确认被拒绝：${error.message}`); }
-      return;
-    }
 
     // ── @ 判定标记（2026-09-26）────────────────────────────────────────
     // 根治两类误判：① 群友 @ 的人与机器人**重名** —— 文本包含匹配必然把
@@ -1328,7 +1313,7 @@ export function createApp({ log = console.log } = {}) {
   // 声明式路由表（src/routes.js）：把所有依赖一次性注入。
   // 路由 handler 通过闭包取用这些依赖，handleHttp 只负责匹配分发。
   const apiRoutes = createRoutes({
-    store, memory, sessions, onebot, orchestrator, approvals,
+    store, memory, sessions, onebot, orchestrator,
     emit, log,
     localVersion, compareSemver, UPDATE_INFO_URL,
     sanitizeConfig, keyEndpointAllowed, sanitizeProvider,
@@ -1704,7 +1689,7 @@ export function createApp({ log = console.log } = {}) {
     releaseInstanceLock();
   }
 
-  return { server, onebot, store, memory, stickers, sender, sessions, orchestrator, approvals, start, stop, emit, getConfig, updateConfig, launchSnowluma, stopSnowluma, snowlumaStatus, launchPortableQQ, stopPortableQQ, qqPortableStatus, reloadSkills };
+  return { server, onebot, store, memory, stickers, sender, sessions, orchestrator, start, stop, emit, getConfig, updateConfig, launchSnowluma, stopSnowluma, snowlumaStatus, launchPortableQQ, stopPortableQQ, qqPortableStatus, reloadSkills };
 }
 
 /**

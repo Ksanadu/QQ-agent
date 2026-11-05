@@ -24,8 +24,6 @@
 // ⚠️ 相对导入层级：本文件在 <app>/skills/<id>/index.js，核心模块在 <app>/src/，
 //    所以到 src 是 **../../src/**（skills/ 与 plugins/ 在 app/ 下同级）。
 //    层级数错 = import 直接抛 ERR_MODULE_NOT_FOUND，技能页显示"加载失败"。
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { findSticker, loadStickerStore, saveStickerStore } from '../../src/stickers.js';
 
 /** 出厂默认值（与 skill.json 的 settings 对齐）。 */
@@ -290,7 +288,7 @@ export function setup(a) {
   api.registerTool({
     id: 'delete_sticker',
     name: '删除表情',
-    description: '把表情从 QQ 收藏里删除（不可恢复）。必须两步走：第一次只传 stickerIds（不传 confirm）拿到预览清单，把这批要删的用大白话说给用户听、等用户明确同意；后续 confirm=true 仅提交核心待批准操作，不会直接删除；必须管理控制台批准或指定管理员确认操作码。用户没同意就绝不要传 confirm。id 从 sticker_audit 或 list_stickers 拿。',
+    description: '把表情从 QQ 收藏里删除（不可恢复）。必须两步走：第一次只传 stickerIds（不传 confirm）拿到预览清单，把这批要删的用大白话说给用户听、等用户明确同意；用户明确同意后，带同一批 stickerIds 和 confirm=true 执行删除。用户没同意就绝不要传 confirm。id 从 sticker_audit 或 list_stickers 拿。',
     category: 'sticker',
     icon: '🗑️',
     parameters: {
@@ -301,7 +299,7 @@ export function setup(a) {
           oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }]
         },
         reason: { type: 'string', description: '为什么删（一句话，会写进记录，也提醒你自己复核）' },
-        confirm: { type: 'boolean', description: '是否确认执行。默认 false = 只预览不删；true 仅提交待批准操作，实际删除必须由核心验证授权' }
+        confirm: { type: 'boolean', description: '是否确认执行。默认 false = 只预览不删；true = 用户确认后执行删除' }
       },
       required: ['stickerIds']
     },
@@ -351,10 +349,27 @@ export function setup(a) {
           });
         }
 
-        // Only the trusted core executor may delete QQ favorites.
-        if (!ctx.actions?.requestStickerDeletion) return err('核心尚未提供授权删除服务，请升级核心后再操作');
-        const operation = await ctx.actions.requestStickerDeletion({ stickerIds: resolved.map((entry) => entry.id), reason: args.reason });
-        return ok({ pending: true, operation, note: '尚未删除任何表情。请到设置 → 操作批准核对这批清单并批准；指定管理员也可在本会话发送：确认删除 ' + operation.id });
+        const results = [];
+        for (const entry of resolved) {
+          if (!entry.emojiId) {
+            results.push({ id: entry.id, deleted: false, error: '没有 QQ 收藏身份，无法删除' });
+            continue;
+          }
+          try {
+            await ctx.onebot.call('delete_custom_face', { emoji_id: String(entry.emojiId) });
+            deletedThisRun.add(String(entry.id));
+            ctx.stickers.entries = (ctx.stickers.entries || entries).filter((e) => e.id !== entry.id && String(e.emojiId) !== String(entry.emojiId));
+            results.push({ id: entry.id, deleted: true });
+          } catch (error) {
+            results.push({ id: entry.id, deleted: false, error: error.message });
+          }
+        }
+        let cleanupWarning;
+        if (results.some((r) => r.deleted)) {
+          try { saveStickerStore(ctx.stickers.entries); }
+          catch (error) { cleanupWarning = `QQ 已删除，本地缓存保存失败：${error.message}`; }
+        }
+        return ok({ deleted: results.filter((r) => r.deleted).length, results, ...(cleanupWarning ? { cleanupWarning } : {}), ...(unknown.length ? { unknownIds: unknown } : {}) });
       } catch (error) {
         return err(`删除表情失败：${error?.message ?? error}`);
       }
