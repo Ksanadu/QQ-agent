@@ -41,10 +41,11 @@ function renderSettingsSidebar() {
   const menu = [
     ['api', '模型 API'],
     ['search', '搜索服务'],
-    ['memory', '记忆与人设'],
     ['chat', '聊天设置'],
-    ['desktop', '界面与系统'],
-    ['tools', '工具与技能']
+    ['memory', '记忆人设'],
+    ['desktop', '界面系统'],
+    ['tools', '工具技能'],
+    ['archive', '会话存档']
   ];
   sidebar.innerHTML = `
     <div class="settings-runstate">
@@ -63,6 +64,10 @@ function renderSettingsSidebar() {
       state.settingsSection = el.dataset.section;
       renderSettingsSidebar();
       renderSettings();
+      if (state.settingsSection === 'archive') api('/api/chats').then(d => {
+        state.chats = d.chats || [];
+        if (state.settingsSection === 'archive') renderSettings();
+      }).catch(e => alert(e.message));
       // 切设置分区 = 整页表单重建：新内容淡入（对齐 concept2 的 pane 切换）
       uiEnter($('#settings-form'));
     });
@@ -100,6 +105,7 @@ function renderSettings() {
     };
   })();
   const c = state.config;
+  if (typeof parkArchiveDetail === 'function') parkArchiveDetail();
   state.settingsSection = ({ persona: 'memory', allow: 'chat', onebot: 'desktop', approvals: 'api' })[state.settingsSection] || state.settingsSection;
   renderSettingsSidebar();
   try {
@@ -131,7 +137,8 @@ function renderSettings() {
   if (!(state.chats || []).length && !renderSettings.__chatsFetch) {
     renderSettings.__chatsFetch = true;
     api('/api/chats').then((d) => {
-      if ((d.chats || []).length && state.tab === 'settings') renderSettings();
+      state.chats = d.chats || [];
+      if (state.chats.length && state.tab === 'settings') renderSettings();
     }).catch(() => {}).finally(() => { renderSettings.__chatsFetch = false; });
   }
 }
@@ -141,10 +148,11 @@ function renderSettingsSection(c) {
   const sections = {
     api: () => renderApiSection(c),
     search: () => renderSearchSection(c),
-    memory: () => `<h3>记忆与人设</h3>${settingsSectionCard(renderMemorySettingsSection(c), { id: 'card-memory', title: '记忆', icon: '🧠', open: true })}${settingsSectionCard(renderPersonaSection(c), { id: 'card-persona', title: '人设', icon: '🎭', open: true })}`,
-    chat: () => renderChatSection(c) + settingsSectionCard(renderAllowSection(c), { id: 'settings-allow', title: '白名单', icon: '📋' }),
+    memory: () => `<h3>记忆人设</h3>${settingsSectionCard(renderMemorySettingsSection(c), { id: 'card-memory', title: '记忆', icon: '🧠', open: true })}${settingsSectionCard(renderPersonaSection(c), { id: 'card-persona', title: '人设', icon: '🎭', open: true })}`,
+    chat: () => renderChatSection(c) + settingsSectionCard(renderAllowSection(c), { id: 'settings-allow', title: '白名单与屏蔽', icon: '📋' }),
     desktop: () => renderDesktopSection(c) + renderOnebotSection(c),
-    tools: () => renderToolsSection(c)
+    tools: () => renderToolsSection(c),
+    archive: () => renderArchiveSettings()
   };
   const render = sections[sec] || sections.api;
   return `
@@ -186,7 +194,6 @@ function renderApiSection(c) {
   const sc = (typeof setCard === 'function') ? setCard : (o) => `<div class="setcard">${o.body}</div>`;
   return `
     <h3 id="settings-api">模型 API</h3>
-    <p class="setsub">选渠道、配降级、算成本 —— 常用项内联，低频项点开折叠卡</p>
     ${sc({
       id: 'card-api-model',
       icon: '🔑',
@@ -657,7 +664,10 @@ function openPerChatPersonaModal(chatKey) {
 
 function renderAllowSection(c) {
   return `
-    <h3 id="settings-allow">白名单</h3>
+    <h3 id="settings-allow">白名单与屏蔽</h3>
+    <div class="field" style="margin-top:14px">
+      <button class="btn" id="blocklist-btn" style="height:44px;padding:0 28px;font-size:14px">管理屏蔽名单</button>
+    </div>
     <div class="hint" style="margin-bottom:10px">白名单为空时机器人不会在任何群聊/私聊内运行。</div>
     <div class="field"><label>从 QQ 账号直接勾选</label>
       <div class="allow-pick-row">
@@ -672,7 +682,7 @@ function renderAllowSection(c) {
     <div class="checkbox-row"><input type="checkbox" id="cfg-allowallwhenempty" ${c.allowAllWhenEmpty === true ? 'checked' : ''} />
       <label for="cfg-allowallwhenempty">白名单留空时允许所有会话</label></div>
     <div class="hint">说明：勾选后，若上方两个列表都为空，机器人会在<b>所有</b>群聊和私聊中运行；只要填了任意一项，就只按名单过滤。</div>
-    <div class="hint" style="margin-top:8px">按会话的独立人设在「记忆与人设」中配置（关闭"统一人设"后出现）。</div>`;
+    <div class="hint" style="margin-top:8px">按会话的独立人设在「记忆人设」中配置（关闭"统一人设"后出现）。</div>`;
 }
 
 // 表情包积极程度档位：[值, 显示名]
@@ -807,6 +817,25 @@ function renderChatSection(c) {
 return `
     <h3>聊天设置</h3>
     ${fold({
+      id: 'card-active-config',
+      icon: '⚡',
+      title: '活跃设置',
+      sub: '响应档位 / 峰谷',
+      val: tierSummary(sliderToTierUI_tierToSlider(st)),
+      open: true,
+      body: `<div class="ac-controls">
+        <div class="btn ac-peak-btn" id="ac-peak-btn" role="button" tabindex="0" title="点击设置高峰时段（开始 / 结束与预设方案）">
+          <span>🌅 峰谷时段</span>
+          <label class="switch ac-peak-switch" title="启用 / 停用峰谷切换（高峰时段用高峰档，其余时间用低谷档）"><input type="checkbox" id="ac-peak-enabled" ${st.peakSchedule?.enabled === true ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>
+        </div>
+        <button class="btn" id="ac-tier-params-btn" title="档位参数：历史条数与缓存">⚙ 档位参数</button>
+        <label class="switch" style="padding:0" title="开 = 所有群共用同一套档位 / 峰谷时段；关 = 每个群单独设置"><input type="checkbox" id="ac-unifiedtier" ${st.unifiedTier !== false ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span><span style="font-size:12px">统一设置</span></label>
+      </div>
+<div id="ac-editor"></div>
+<div class="field"><label for="ac-keywords">关键词表，英文逗号隔开</label><textarea id="ac-keywords" rows="3">${esc((st.keywords || []).join(','))}</textarea></div>`
+    })}
+
+    ${fold({
       id: 'card-send-config',
       icon: '📨',
       title: '信息发送配置',
@@ -857,26 +886,6 @@ return `
       </div>
 `
     })}
-    ${fold({
-      id: 'card-active-config',
-      icon: '⚡',
-      title: '活跃设置',
-      sub: '响应档位 / 峰谷',
-      val: tierSummary(sliderToTierUI_tierToSlider(st)),
-      // 卡头插槽：竖分割线 + 三件套（峰谷时段 / 档位参数 / 统一设置），
-      // 紧贴标题块左侧排布，与右上角档位摘要之间留白。
-      extra: `<span class="ac-head-controls"><span class="ac-head-div"></span>
-        <div class="btn ac-peak-btn" id="ac-peak-btn" role="button" tabindex="0" title="点击设置高峰时段（开始 / 结束与预设方案）">
-          <span>🌅 峰谷时段</span>
-          <label class="switch ac-peak-switch" title="启用 / 停用峰谷切换（高峰时段用高峰档，其余时间用低谷档）"><input type="checkbox" id="ac-peak-enabled" ${st.peakSchedule?.enabled === true ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span></label>
-        </div>
-        <button class="btn" id="ac-tier-params-btn" title="档位参数：各档条数 / 关键词表 / 被召唤后持续参与">⚙ 档位参数</button>
-        <label class="switch" style="padding:0" title="开 = 所有群共用同一套档位 / 峰谷时段；关 = 每个群单独设置"><input type="checkbox" id="ac-unifiedtier" ${st.unifiedTier !== false ? 'checked' : ''} /><span class="track"><span class="thumb"></span></span><span style="font-size:12px">统一设置</span></label>
-      </span>`,
-      open: false,
-      body: `<div id="ac-editor"></div>`
-    })}
-
     ${fold({
       id: 'card-conversation-listener',
       icon: '👂',
@@ -960,14 +969,12 @@ return `
       </div>`
     })}
 
-    <div class="field" style="margin-top:14px">
-      <button class="btn" id="blocklist-btn" style="height:44px;padding:0 28px;font-size:14px">管理屏蔽名单</button>
-    </div>`;
+`;
 }
 
 function renderDesktopSection(c) {
   return `
-    <h3>界面与系统</h3>
+    <h3>界面系统</h3>
     ${window.qqAgentShell ? `
     <div class="checkbox-row"><input type="checkbox" id="cfg-autostart" ${c.server?.autoStart ? 'checked' : ''} />
       <label for="cfg-autostart">开机自启</label></div>
@@ -1230,8 +1237,7 @@ function openSkillSettings(skillId) {
       await loadSkillsStatus();
       // 两页都重绘：设置弹窗可能从技能页或插件页打开，
       // 而改动会同时影响状态徽章。重绘代价可忽略（每页最多十来张卡片）。
-      renderModulePage('skill');
-      renderModulePage('plugin');
+      renderModulePage('all');
       close();
     } catch (err) {
       alert(`保存失败：${err.message}`);
@@ -1239,53 +1245,13 @@ function openSkillSettings(skillId) {
   });
 }
 
-/**
- * 扩展页（技能 / 插件）
- *
- * 两型在**代码里完全同构**（同一条加载器、同一套清单字段、同一个开关），
- * 唯一的区别是"谁决定何时执行"：
- *   skill  （LLM 型）  —— 注册工具，模型看了 description 自己决定调不调
- *   plugin （确定性型）—— 提供能力/钩子，核心代码按能力名确定性调用，必然执行
- *
- * 这件事对使用者太重要了（决定"这个功能会不会被模型忽略"），所以拆成两个页签，
- * 但渲染逻辑共用一份 —— 否则两页的卡片、分组、开关行为迟早会分叉。
- *
- * ⚠️ 状态一律用后端 /api/skills 的判定结果，前端**不自己推断**能不能用 ——
- * 否则又会出现"界面说能用、实际不生效"的两套口径。
- */
+// 技能与插件共用页面，保留各条目的真实类型用于设置与市场上传。
 const MODULE_KINDS = {
-  skill: {
-    kind: 'skill',
-    tab: 'skills',
-    boxSel: '#skills-page',
-    title: '技能（Skill）',
-    dir: 'skills/',
-    emptyHint: `还没加载到任何技能。<br />LLM 型技能放在项目的 <code>skills/&lt;id&gt;/</code> 目录，需要 <code>skill.json</code> + <code>index.js</code>。`,
-    lead: `技能是 <b>LLM 型</b>扩展：它们注册工具进模型的 function 列表，<b>用不用、什么时候用由模型自己判断</b>。<br />
-      `,
-    setupTitle: '新增技能',
-    setupHint: `在 <code>skills/&lt;id&gt;/</code> 放 <code>skill.json</code> + <code>index.js</code>，
-      导出 <code>setup(api)</code> 并在里面 <code>api.registerTool({...})</code>。
-      热重载默认开启，保存即生效。完整规范见 <code>doc/extend_development/skill-development.md</code>。`
-  },
-  plugin: {
-    kind: 'plugin',
-    tab: 'plugins',
-    boxSel: '#plugins-page',
-    title: '插件（Plugin）',
-    dir: 'plugins/',
-    emptyHint: `还没加载到任何插件。<br />确定性型插件放在项目的 <code>plugins/&lt;id&gt;/</code> 目录，需要 <code>plugin.json</code> + <code>index.js</code>。`,
-    lead: `插件是 <b>确定性型</b>扩展：它们提供<b>能力</b>（<code>providers</code>）或<b>钩子</b>（<code>hooks</code>），
-      由核心代码按能力名确定性调用 —— <b>条件满足就一定会执行，不经过 LLM，模型想忽略也忽略不掉</b>。<br />
-      代价是它不能"看情况发挥"：什么时候触发必须在代码里写死。需要模型理解意图的功能，应该做成技能（见旁边的「技能」页签）。`,
-    setupTitle: '新增插件',
-    setupHint: `在 <code>plugins/&lt;id&gt;/</code> 放 <code>plugin.json</code> + <code>index.js</code>，
-      导出 <code>setup(api)</code>，并用 <code>export const providers = {...}</code> 或 <code>export const hooks = {...}</code> 声明扩展点。
-      热重载默认开启，保存即生效。完整规范见 <code>doc/extend_development/plugin-development.md</code>。`
-  }
+  all: { kind: 'all', tab: 'skills', boxSel: '#skills-page', title: '技能与插件', emptyHint: '尚未安装技能或插件。', lead: '' }
 };
 
 async function loadModulePage(kind, { rescan = false } = {}) {
+  kind = 'all';
   const meta = MODULE_KINDS[kind];
   if (!meta) return;
   const box = $(meta.boxSel);
@@ -1311,15 +1277,12 @@ function renderModuleSkeleton(meta) {
  * @param {'skill'|'plugin'} kind 只渲染该类型；另一类的条目**完全不进这一页**
  */
 function renderModulePage(kind) {
+  kind = 'all';
   const meta = MODULE_KINDS[kind];
   if (!meta) return '';
   const box = $(meta.boxSel);
   const all = state.skills || [];
-  // 只留本页该管的类型。
-  // ⚠️ kind 为 null（自定义根目录，如测试用的临时目录）时归入**技能页**而不是丢弃 ——
-  // "界面上凭空少了一个条目"比"归错页"难排查得多（用户刚刚就踩过这个坑）。
-  // 卡片上会标「目录未识别」提示作者去确认放置位置。
-  const items = all.filter((s) => s.kind === meta.kind || (s.kind == null && meta.kind === 'skill'));
+  const items = all;
 
   // 统计按本页条目现算：后端 summary 是全量的，直接用会把另一类也算进来
   const mine = {
@@ -1332,7 +1295,7 @@ function renderModulePage(kind) {
   if (!items.length) {
     const emptyHtml = `<div class="usage-wrap">
       <div class="usage-head"><h2>${esc(meta.title)}</h2>
-        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" title="从市场口令安装，或查看自建指南">＋ 添加${meta.kind === 'skill' ? '技能' : '插件'}</button>
+        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" type="button">＋ 添加技能/插件</button><button type="button" class="btn btn-small module-market-btn">跳转市场</button>
         <div class="usage-days">
           <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
         </div></div>
@@ -1375,12 +1338,12 @@ function renderModulePage(kind) {
     const settingsBtn = allFields.length
       ? `<button class="mcard-gear" data-skill-id="${esc(s.id)}" title="设置（${allFields.length} 项）" aria-label="打开 ${esc(s.name)} 的设置">⚙</button>`
       : '';
-    const uploadBtn = `<button class="mcard-upload" data-skill-id="${esc(s.id)}" data-skill-kind="${kind}" title="上传到市场" aria-label="上传 ${esc(s.name)} 到市场">⬆</button>`;
+    const uploadBtn = `<button class="mcard-upload" data-skill-id="${esc(s.id)}" data-skill-kind="${s.kind || 'skill'}" title="上传到市场" aria-label="上传 ${esc(s.name)} 到市场">⬆</button>`;
     const haystack = [s.id, s.name, s.description, s.dir].filter(Boolean).join(' ').toLowerCase();
     return `
     <div class="mcard ${stateCls}" data-skill-id="${esc(s.id)}" data-search="${esc(haystack)}" role="button" tabindex="0" title="${esc(stateTitle)}">
       <div class="mcard-main">
-        <div class="mcard-name">${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span></div>
+        <div class="mcard-name"><span class="tool-dep">${s.kind === 'plugin' ? '插件' : '技能'}</span> ${esc(s.name)} <span class="skill-card__ver">v${esc(s.version)}</span></div>
         ${(s.toolIds || []).length ? `<div class="mcard-tools" title="本技能注册的工具 id">${(s.toolIds || []).map((id) => `<code class="mcard-tool-id">${esc(id)}</code>`).join('')}</div>` : ''}
         <div class="mcard-desc">${esc(s.description || '（没有写介绍）')}</div>
         ${errLine ? `<div class="mcard-err">${esc(errLine)}</div>` : ''}
@@ -1397,7 +1360,7 @@ function renderModulePage(kind) {
   `).join('');
 
   // 残留配置：只在技能页展示一次（两页共用 state）。
-  const uninstalledHtml = (kind === 'skill' && (state.uninstalledSkills || []).length)
+  const uninstalledHtml = (state.uninstalledSkills || []).length
     ? `<h3 class="usage-h3">已配置但未安装（${state.uninstalledSkills.length}）</h3>
       <div class="hint" style="margin-bottom:6px">这些条目在配置里留着开关/设置，但 <code>skills/</code> 与 <code>plugins/</code> 目录里已经没有对应的文件夹。重装同名插件会自动恢复这些设置；确认不要了可以清理掉。</div>
       <div class="tool-meta" style="gap:6px;margin-bottom:8px">
@@ -1409,18 +1372,13 @@ function renderModulePage(kind) {
   const html = `<div class="usage-wrap">
       <div class="usage-head">
         <h2>${esc(meta.title)}</h2>
-        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" title="从市场口令安装，或查看自建指南">＋ 添加${meta.kind === 'skill' ? '技能' : '插件'}</button>
+        <button class="btn btn-small" id="${esc(meta.tab)}-add-btn" type="button">＋ 添加技能/插件</button><button type="button" class="btn btn-small module-market-btn">跳转市场</button>
         <input type="search" class="module-search" id="module-search-${esc(meta.tab)}"
-          placeholder="搜索${meta.kind === 'skill' ? '技能' : '插件'}名称 / 简介…" autocomplete="off" />
+          placeholder="搜索技能/插件名称 / 简介…" autocomplete="off" />
         <div class="usage-days">
           <span class="uc-tag" title="生效中 / 这一页的总数">${mine.active} / ${mine.total} 生效</span>
           <button class="btn btn-small" id="${esc(meta.tab)}-refresh-btn">刷新</button>
         </div>
-      </div>
-      <div class="hint" style="margin-bottom:14px">
-        ${meta.lead}<br />
-        开关只有这一处 —— 关闭后它注册的工具、提供的能力、提示词片段和请求改写会**同时**失效。
-        不可用时下面会直接写明原因（未启用 / 缺依赖 / 模型不支持 / 加载失败）。
       </div>
       ${sections}
       ${uninstalledHtml}
@@ -1433,16 +1391,18 @@ function renderModulePage(kind) {
 }
 
 /** 供渲染测试按名取用的两个入口（render-test 会逐个执行这些函数）。 */
-function renderSkillsPage() { return renderModulePage('skill'); }
-function renderPluginsPage() { return renderModulePage('plugin'); }
+function renderSkillsPage() { return renderModulePage('all'); }
+function renderPluginsPage() { return renderModulePage('all'); }
 
 function bindModulePageEvents(kind) {
+  kind = 'all';
   const meta = MODULE_KINDS[kind];
   if (!meta) return;
   // 「＋ 添加」入口（标题旁）：打开添加模态框（去市场口令安装 / 自建指南）。
   // ⚠️ 这个入口曾经从模板里消失过 —— openAddModuleModal 变成没人调用的孤本，
   // 技能/插件页直接失去"添加"能力。按钮与绑定必须成对存在（2026-09-26 修复）。
-  $(`#${meta.tab}-add-btn`)?.addEventListener('click', () => openAddModuleModal(kind));
+  $(`#${meta.tab}-add-btn`)?.addEventListener('click', openInstallCodeModal);
+  $$('.module-market-btn').forEach(btn => btn.addEventListener('click', openModuleMarket));
   $(`#${meta.tab}-refresh-btn`)?.addEventListener('click', () => loadModulePage(kind, { rescan: true }));
   // 残留配置清理（只在技能页渲染，按钮也只在这一页出现）
   $('#skills-cleanup-btn')?.addEventListener('click', async () => {
@@ -1454,7 +1414,7 @@ function bindModulePageEvents(kind) {
     try {
       const r = await api('/api/skills/cleanup', { method: 'POST', body: JSON.stringify({ ids }) });
       if (r.config) state.config = r.config;
-      await loadModulePage('skill');
+      await loadModulePage('all');
     } catch (e) {
       alert(`清理失败：${e?.message || e}`);
       btn.disabled = false;
@@ -1609,7 +1569,7 @@ function renderToolsSection(c) {
   }).join('');
 
   return `
-    <h3 id="settings-tools">工具与技能</h3>
+    <h3 id="settings-tools">工具技能</h3>
     <div class="checkbox-row">${switchHtml('cfg-tools-enabled', toolsCfg.enabled !== false, '启用工具系统')}</div>
     <div class="tool-actions" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" class="btn btn-small" id="tools-enable-all">全部启用</button>
@@ -1620,7 +1580,7 @@ function renderToolsSection(c) {
 }
 
 /**
- * 完整提示词预览文本（设置-工具与技能 & 技能页右侧共用同一份）。
+ * 完整提示词预览文本（设置-工具技能 & 技能页右侧共用同一份）。
  * 数据来自 GET /api/prompt-preview —— 后端用运行时同一套
  * buildSystemPrompt + getToolAvailability 组装，按当前启停状态实时反映；
  * 前端不再自己拼（曾经前端复制了一份静态模板，永远是"全启用"的样子，

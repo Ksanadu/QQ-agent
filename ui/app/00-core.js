@@ -757,6 +757,8 @@ async function resumePause({ skipBacklog = false } = {}) {
 }
 
 function switchTab(name) {
+  if (name === 'plugins') name = 'skills';
+  if (name === 'chats') { state.settingsSection = 'archive'; name = 'settings'; }
   // 离开设置页（无论去哪）前，先把防抖窗口内还没落盘的改动立即保存。
   // 必须在页签切换、任何 loadXxx 触发**之前**做：等切走之后表单 DOM 还在
   // （只是视图隐藏）其实也能读，但"正在输入的最后一个字段"可能只过了
@@ -796,8 +798,7 @@ function switchTab(name) {
   }
   if (name === 'memory') loadMemoryView();
   if (name === 'usage') loadUsageView({ force: true });
-  if (name === 'skills') loadModulePage('skill');
-  if (name === 'plugins') loadModulePage('plugin');
+  if (name === 'skills') loadModulePage('all');
   if (name === 'snowluma') loadSnowlumaPage();
   if (name === 'settings') loadSettings();
 }

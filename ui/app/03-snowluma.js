@@ -10,13 +10,11 @@ async function refreshSnowlumaLogs() {
   const box = $('#snowluma-page');
   if (!box) return;
   const slPre = box.querySelector('#sl-logs-view');
-  const qqPre = box.querySelector('#qq-logs-view');
   const appPre = box.querySelector('#app-logs-view');
-  if (!slPre && !qqPre && !appPre) return;   // 页面还没渲染过，等下次整页刷新
+  if (!slPre && !appPre) return;   // 页面还没渲染过，等下次整页刷新
   try {
-    const [logs, qqLogs, appLogsData] = await Promise.all([
+    const [logs, appLogsData] = await Promise.all([
       api('/api/snowluma/logs'),
-      api('/api/qq-portable/logs').catch(() => ({ logs: [] })),
       api('/api/logs?limit=120').catch(() => ({ logs: [] }))
     ]);
     const fmt = (arr) => (arr || []).map((l) => {
@@ -30,8 +28,7 @@ async function refreshSnowlumaLogs() {
       pre.textContent = text;
       if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
     };
-    setLog(slPre, fmt(logs.logs));
-    setLog(qqPre, fmt(qqLogs.logs));
+    setLog(slPre, logs.error ? `日志读取失败：${logs.error}` : fmt(logs.logs));
     if (appPre) {
       const appText = (appLogsData.logs || []).map((e) => {
         const t = new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false });
@@ -56,10 +53,9 @@ function scheduleSnowlumaReload(opts = {}) {
 
 async function loadSnowlumaPage({ quiet = false } = {}) {
   try {
-    const [status, logs, qqLogs, appLogsData] = await Promise.all([
+    const [status, logs, appLogsData] = await Promise.all([
       api('/api/status'),
       api('/api/snowluma/logs'),
-      api('/api/qq-portable/logs'),
       api('/api/logs?limit=120').catch(() => ({ logs: [], level: 'info' }))
     ]);
     const s = status;
@@ -71,19 +67,10 @@ async function loadSnowlumaPage({ quiet = false } = {}) {
     const embedded = !!s.snowluma?.embedded;
     const pid = s.snowluma?.pid ?? null;
     const webuiUrl = s.snowluma?.webuiUrl || '';
-    // 便携 QQ 状态
-    const qq = s.qqPortable || {};
-    const qqReady = !!qq.ready;
-    const qqRunning = !!qq.running;
-    const qqPid = qq.pid ?? null;
     const logText = (logs.logs || []).map((l) => {
       const t = new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false });
       return `[${t}]${l.stream === 'stderr' ? ' ⚠' : ''} ${l.text}`;
-    }).join('\n') || '暂无日志';
-    const qqLogText = (qqLogs.logs || []).map((l) => {
-      const t = new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false });
-      return `[${t}]${l.stream === 'stderr' ? ' ⚠' : ''} ${l.text}`;
-    }).join('\n') || '暂无日志';
+    }).join('\n') || (logs.error ? `日志读取失败：${logs.error}` : '暂无日志');
     // 应用日志（logger 的内存环形缓冲）
     const appLogs = appLogsData.logs || [];
     const appLogLevel = appLogsData.level || 'info';
@@ -108,50 +95,13 @@ async function loadSnowlumaPage({ quiet = false } = {}) {
       <div class="snowluma-page-card">
         <h2>SnowLuma（OneBot 网关）</h2>
 
-        <!-- 一键启动区域（核心入口） -->
-        ${!onebotConnected ? `
-        <div class="quick-start-section" style="background:var(--bg);border:none;border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--raise-sm)">
-          <div style="font-size:15px;font-weight:600;margin-bottom:8px">🚀 快速启动</div>
-          <div class="muted" style="font-size:13px;margin-bottom:12px;line-height:1.6">
-            ${!qqReady ? '便携 QQ 未安装，请先运行 <code>npm run setup</code>' :
-              !qqRunning ? '点击下面按钮，自动完成：启动 QQ → 启动 SnowLuma → 连接 OneBot' :
-              !running ? 'QQ 已运行，点击启动 SnowLuma 并连接' :
-              'SnowLuma 已运行，等待 OneBot 连接…'}
-          </div>
-          <button class="btn btn-primary" id="quick-start-btn" style="font-size:14px;padding:10px 20px" ${!qqReady ? 'disabled' : ''}>
-            ${!qqReady ? '请先运行 npm run setup' :
-              !qqRunning ? '一键启动（QQ + SnowLuma）' :
-              !running ? '启动 SnowLuma' :
-              '等待连接…'}
-          </button>
-          <span id="quick-start-hint" class="muted" style="font-size:12px;margin-left:12px"></span>
-        </div>` : ''}
-
-        <!-- 便携 QQ 内核状态 -->
-        <div class="snowluma-qq-section">
-          <div class="snowluma-state-row">
-            <span class="dot ${qqRunning ? 'dot-on' : 'dot-off'}"></span>
-            <span>QQ 内核：<strong>${qqRunning ? `运行中${qqPid ? `（pid ${qqPid}）` : ''}` : (qqReady ? '未启动' : '未安装')}</strong></span>
-            ${!qqReady ? '<span class="muted" style="color:var(--orange)">请先运行 npm run setup</span>' : ''}
-          </div>
-          ${qqReady ? `
-          <div class="snowluma-state-row muted" style="font-size:12px">
-            <span>目录：${esc(qq.dir || '')}</span>
-          </div>` : ''}
-          <div class="snowluma-actions">
-            <button class="btn btn-small" id="qq-start-btn" ${!qqReady || qqRunning ? 'disabled' : ''}>${qqRunning ? '已运行' : '单独启动 QQ'}</button>
-            <button class="btn btn-small btn-danger" id="qq-stop-btn" ${!qqRunning ? 'disabled' : ''}>关闭 QQ</button>
-            <span id="qq-hint" class="muted" style="font-size:12px"></span>
-          </div>
-          ${qqLogText !== '暂无日志' ? `
-          <div class="sl-log-block">
-            <div class="hint sl-log-head">QQ 日志</div>
-            <pre class="snowluma-logs-view" id="qq-logs-view" style="max-height:120px">${esc(qqLogText)}</pre>
-          </div>` : ''}
+        <div class="snowluma-state-row">
+          <span class="dot ${s.localQQ?.connected ? 'dot-on' : 'dot-off'}"></span>
+          <span>本机 QQ：${s.localQQ?.connected ? '已连接' : '未连接'}</span>
+          <button class="btn btn-small" id="qq-start-btn">单独启动 QQ</button>
+          <span id="qq-hint" class="muted"></span>
         </div>
-
         <hr class="sl-sep">
-
         <!-- SnowLuma 状态 -->
         <div class="snowluma-qq-section">
           <div class="snowluma-state-row">
@@ -227,94 +177,13 @@ async function loadSnowlumaPage({ quiet = false } = {}) {
     const appLogsRefreshBtn = $('#app-logs-refresh-btn');
     if (appLogsRefreshBtn) appLogsRefreshBtn.addEventListener('click', () => loadSnowlumaPage());
 
-    // ── 一键启动按钮事件 ──
-    const quickStartBtn = $('#quick-start-btn');
-    if (quickStartBtn) quickStartBtn.addEventListener('click', async () => {
-      const btn = $('#quick-start-btn');
-      const hint = $('#quick-start-hint');
-      btn.disabled = true;
-      hint.textContent = '';
-
+    $('#qq-start-btn')?.addEventListener('click', async () => {
+      const btn = $('#qq-start-btn'); btn.disabled = true;
       try {
-        // 步骤 1：启动便携 QQ（如果未运行）
-        if (!qqRunning) {
-          btn.textContent = '启动 QQ 中…';
-          hint.textContent = '请在弹出的 QQ 窗口扫码登录';
-          const r = await api('/api/qq-portable/launch', { method: 'POST', body: '{}' });
-          if (!r.ok && !r.alreadyRunning) {
-            hint.textContent = `QQ 启动失败：${r.error}`;
-            btn.disabled = false;
-            btn.textContent = '一键启动（QQ + SnowLuma）';
-            return;
-          }
-          // 等 3 秒让 QQ 完全启动
-          await new Promise((r) => setTimeout(r, 3000));
-        }
-
-        // 步骤 2：启动 SnowLuma（如果未运行）
-        if (!running) {
-          btn.textContent = '启动 SnowLuma 中…';
-          hint.textContent = '正在启动协议端…';
-          const r = await api('/api/snowluma/launch', { method: 'POST', body: '{}' });
-          if (!r.ok && !r.alreadyRunning) {
-            hint.textContent = `SnowLuma 启动失败：${r.error}`;
-            btn.disabled = false;
-            btn.textContent = '一键启动（QQ + SnowLuma）';
-            return;
-          }
-        }
-
-        // 步骤 3：等待 OneBot 连接
-        btn.textContent = '等待 OneBot 连接…';
-        hint.textContent = '首次登录可能需要几秒到几十秒';
-
-        // 轮询检查连接状态（最多 30 秒）
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          const s = await api('/api/status');
-          if (s.onebot?.connected) {
-            hint.textContent = '✅ 已连接！机器人开始工作';
-            btn.textContent = '已连接 ✓';
-            setTimeout(() => loadSnowlumaPage({ quiet: true }), 1500);
-            return;
-          }
-        }
-        hint.textContent = '连接超时，请检查日志或手动刷新';
-        btn.disabled = false;
-        btn.textContent = '重试';
-      } catch (e) {
-        hint.textContent = `启动失败：${e.message}`;
-        btn.disabled = false;
-        btn.textContent = '一键启动（QQ + SnowLuma）';
-      }
-    });
-
-    // ── 便携 QQ 按钮事件 ──
-    const qqStartBtn = $('#qq-start-btn');
-    if (qqStartBtn) qqStartBtn.addEventListener('click', async () => {
-      const btn = $('#qq-start-btn');
-      btn.disabled = true; btn.textContent = '启动中…';
-      $('#qq-hint').textContent = '';
-      try {
-        const r = await api('/api/qq-portable/launch', { method: 'POST', body: '{}' });
-        $('#qq-hint').textContent = r.alreadyRunning ? '便携 QQ 已在运行 ✓' : (r.ok ? '已启动，请在弹出的 QQ 窗口扫码登录' : `启动失败：${r.error}`);
-      } catch (e) {
-        $('#qq-hint').textContent = `启动失败：${e.message}`;
-      }
-      setTimeout(() => loadSnowlumaPage({ quiet: true }), 2500);
-    });
-    const qqStopBtn = $('#qq-stop-btn');
-    if (qqStopBtn) qqStopBtn.addEventListener('click', async () => {
-      const btn = $('#qq-stop-btn');
-      btn.disabled = true; btn.textContent = '关闭中…';
-      $('#qq-hint').textContent = '';
-      try {
-        const r = await api('/api/qq-portable/stop', { method: 'POST', body: '{}' });
-        $('#qq-hint').textContent = r.ok ? '已请求关闭便携 QQ' : `关闭失败：${r.error}`;
-      } catch (e) {
-        $('#qq-hint').textContent = `关闭失败：${e.message}`;
-      }
-      setTimeout(() => loadSnowlumaPage({ quiet: true }), 1500);
+        const r = await api('/api/qq/launch', { method: 'POST', body: '{}' });
+        $('#qq-hint').textContent = r.alreadyRunning ? '本机 QQ 已在运行' : '已启动 QQ';
+      } catch (e) { $('#qq-hint').textContent = e.message; }
+      finally { btn.disabled = false; }
     });
 
     $('#sl-start-btn').addEventListener('click', async () => {

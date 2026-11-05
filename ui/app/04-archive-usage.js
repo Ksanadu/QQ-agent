@@ -1,5 +1,47 @@
 // 〔存档 / 用量〕——M9 拆分第 5 段
 'use strict';
+function parkArchiveDetail() {
+  const detail = $('#chat-detail'), parking = $('#archive-parking');
+  if (detail && parking && !parking.contains(detail)) parking.appendChild(detail);
+}
+
+function renderArchiveSettings() {
+  return `<h3>会话存档</h3>${(state.chats || []).map(c => setCard({
+    id: `archive-${c.key.replace(':', '-')}`, icon: c.key.startsWith('group:') ? '👥' : '👤',
+    title: esc(formatChatTitle(c.key, chatNameOf(c.key))), val: `${c.total || 0} 条`,
+    extra: `<button type="button" class="btn btn-small btn-danger archive-delete" data-chat="${esc(c.key)}">删除</button>`,
+    body: `<div class="archive-host" data-archive-key="${esc(c.key)}"><button type="button" class="btn archive-open" data-chat="${esc(c.key)}">查看消息</button></div>`
+  })).join('') || '<div class="hint">还没有会话存档。</div>'}`;
+}
+
+function bindArchiveSettings() {
+  const open = async key => {
+    const host = [...$$('.archive-host')].find(el => el.dataset.archiveKey === key);
+    if (!host) return;
+    const detail = $('#chat-detail');
+    detail.classList.add('archive-detail'); host.appendChild(detail);
+    await selectChat(key);
+  };
+  $$('.archive-host').forEach(host => {
+    const card = host.closest('.setcard');
+    card.querySelector('.fold-head').addEventListener('click', e => {
+      if (!e.target.closest('button') && card.classList.contains('open')) open(host.dataset.archiveKey);
+    });
+  });
+  $$('.archive-open').forEach(btn => btn.addEventListener('click', () => open(btn.dataset.chat)));
+  $$('.archive-delete').forEach(btn => btn.addEventListener('click', async () => {
+    const key = btn.dataset.chat;
+    if (!(await uiConfirm(`删除「${formatChatTitle(key, chatNameOf(key))}」的全部消息存档？`))) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/chats/${key.replace(':', '_')}`, { method: 'DELETE' });
+      if (state.currentChatKey === key) { state.currentChatKey = null; state.chatMessages = []; $('#chat-detail').innerHTML = ''; }
+      state.chats = state.chats.filter(c => c.key !== key);
+      renderSettings();
+    } catch (e) { alert(`删除失败：${e.message}`); btn.disabled = false; }
+  }));
+}
+
 // ── 存档视图 ──
 async function loadChats({ quiet = false } = {}) {
   try {

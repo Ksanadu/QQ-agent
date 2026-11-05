@@ -231,12 +231,7 @@ a, button, input, textarea, select, summary,
   border-bottom: 1px solid var(--bd); background: var(--bg1); z-index: 3;
 }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14.5px; white-space: nowrap; flex: 0 0 auto; }
-.brand::before {
-  content: 'Q';
-  width: 26px; height: 26px; border-radius: var(--r-xs);
-  display: grid; place-items: center;
-  background: var(--ac); color: #fff; font-size: 13px; font-weight: 800;
-}
+
 .brand-sub { font-size: 11px; color: var(--tx3); font-weight: 500; margin-left: 2px; }
 .top-status { display: flex; align-items: center; gap: 7px; margin-left: auto; flex-wrap: nowrap; min-width: 0; }
 .sep { width: 1px; height: 14px; background: var(--bd2); flex-shrink: 0; }
@@ -1391,61 +1386,6 @@ td b, .tbl td b { color: var(--tx); font-weight: 600; }
   font-family: var(--font-mono); font-size: 11px;
 }
 
-/* ── 「＋ 添加」链路的弹窗（添加入口 / 口令安装 / 自建引导）────────────
-   这几个弹窗此前只有结构没有样式：大按钮是裸文本、悬停文案不切换、
-   口令行没有状态反馈、提示词代码块是浏览器默认灰底（2026-09-26 补齐）。 */
-.addmod-stack { display: flex; flex-direction: column; gap: 10px; }
-.addmod-big {
-  display: grid; place-items: center;
-  padding: 20px 16px; border-radius: var(--r-md);
-  background: var(--bg2); border: 1px solid var(--bd2); color: var(--tx);
-  transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
-}
-.addmod-big:hover { border-color: var(--ac-line); background: var(--ac-soft); transform: translateY(-1px); }
-.addmod-big:active { transform: translateY(0) scale(.995); }
-/* 两段文案叠在同一格里做交叉淡换（'看看市场' ↔ '捞点好货'），不换行不跳高 */
-.addmod-big > span { grid-area: 1 / 1; transition: opacity .14s ease; }
-.addmod-label { font-size: 14px; font-weight: 650; line-height: 1.4; }
-.addmod-hover-label { opacity: 0; font-size: 12px; font-weight: 600; color: var(--ac); }
-.addmod-big:hover .addmod-label { opacity: 0; }
-.addmod-big:hover .addmod-hover-label { opacity: 1; }
-.addmod-diy { background: transparent; border-style: dashed; }
-
-/* 口令安装：逐行口令，校验状态（checking/ok/bad）直接长在行上 */
-#ic-rows { display: flex; flex-direction: column; gap: 8px; }
-.ic-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 9px; border-radius: var(--r-sm);
-  background: var(--bg2); border: 1px solid var(--bd);
-  transition: border-color .16s ease, background-color .16s ease, opacity .16s ease;
-}
-.ic-row.checking { border-color: var(--ac-line); }
-.ic-row.ok { border-color: var(--ok-line); background: var(--ok-soft); }
-.ic-row.bad { border-color: var(--err-line); background: var(--err-soft); }
-.ic-row.dim { opacity: .72; }
-.ic-input {
-  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-  color: var(--tx); font-family: var(--font-mono); font-size: 13px; letter-spacing: .05em;
-}
-.ic-input::placeholder { color: var(--tx3); letter-spacing: 0; }
-.ic-del {
-  flex: 0 0 auto; width: 26px; height: 26px; border-radius: var(--r-xs);
-  color: var(--tx3); font-size: 13px; transition: color .14s ease, background-color .14s ease;
-}
-.ic-del:hover { color: var(--err); background: var(--err-soft); }
-.ic-check { flex: 0 0 auto; }
-.ic-meta {
-  flex: 1; min-width: 0; font-size: 12px; color: var(--tx);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* 自建引导：给 AI 工具的提示词代码块（复制源） */
-.guide-code {
-  margin: 0; padding: 12px 14px;
-  background: var(--bg0); border: 1px solid var(--bd); border-radius: var(--r-sm);
-  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6; color: var(--tx2);
-}
-
 /* 市场账号选择 / 文本链接 */
 .account-pick {
   display: flex; align-items: center; gap: 10px; width: 100%;
@@ -1743,9 +1683,7 @@ details.collapsible.coll-shut > summary::after { transform: rotate(0deg); }
 
 /* 活跃设置卡头三件套（峰谷时段 / 档位参数 / 统一设置）：
    紧贴标题块左侧（has-extra 时标题块不再撑开），右侧留白全部让给档位摘要 */
-.ac-head-controls { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-right: auto; }
 .setcard-head.has-extra .sc-tt { flex: 0 1 auto; }
-.ac-head-div { width: 1px; align-self: stretch; background: var(--bd2); margin: 2px 2px 2px 0; }
 
 /* 档位参数弹窗：句式设置行「当xxx时，发送 N 条历史信息。」—— 输入框嵌进句子里，行距收紧 */
 .tp-row { padding: 3px 0; font-size: 13px; }
@@ -1791,3 +1729,6 @@ body input[type="checkbox"]:not(.switch input):disabled { opacity: .5; cursor: d
 /* Shared dropdown surface, including persona and model dialogs. */
 select { color: var(--tx); background: var(--bg2); border: 1px solid var(--bd); border-radius: var(--r-sm); padding: 9px 10px; min-width: 0; font: inherit; }
 select:focus-visible { outline: 2px solid var(--ac); outline-offset: 1px; }
+
+.ac-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+.archive-detail { max-height:650px; overflow:auto; }

@@ -130,9 +130,7 @@ function connectSSE() {
   });
   es.addEventListener('status', () => refreshStatus());
   es.addEventListener('snowluma-status', () => { refreshStatus(); if (state.tab === 'snowluma') scheduleSnowlumaReload(); });
-  es.addEventListener('qq-portable-status', () => { refreshStatus(); if (state.tab === 'snowluma') scheduleSnowlumaReload(); });
   // 日志事件只刷日志文本，不整页重建（曾经每条日志都 innerHTML 重绘整页）
-  es.addEventListener('qq-portable-log', () => { if (state.tab === 'snowluma') refreshSnowlumaLogs(); });
   es.addEventListener('snowluma-log', (ev) => {
     let d = {};
     try { d = JSON.parse(ev.data); } catch { /* 坏数据跳过本条，不断流 */ }

@@ -338,6 +338,13 @@ export class ChatStore {
    * 清空某会话的全部消息（整体清除）。返回删掉的条数。
    * 会话文件保留（空 messages），下次来消息继续往里写。
    */
+  deleteChat(chatKey) {
+    const removed = this.#state(chatKey).messages.length;
+    fs.rmSync(chatFile(chatKey), { force: true });
+    this.chats.delete(chatKey);
+    return removed;
+  }
+
   clearChat(chatKey) {
     const st = this.#state(chatKey);
     const removed = st.messages.length;

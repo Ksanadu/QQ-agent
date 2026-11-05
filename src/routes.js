@@ -50,7 +50,7 @@ export function createRoutes(deps) {
     readBody, authorize,
     snowlumaDir, snowlumaWsPort, snowlumaWebuiUrl, snowlumaStatus, snowlumaLogs,
     launchSnowluma, stopSnowluma,
-    qqPortableStatus, qqPortableLogs, launchPortableQQ, stopPortableQQ,
+    launchLocalQQ, localQQConnected, getSnowlumaLogs,
     visionScan,
     buildUsageStats, buildUsageBreakdown,
     reloadSkills
@@ -125,7 +125,7 @@ export function createRoutes(deps) {
             webuiUrl: snowlumaWebuiUrl(),
             ...snowlumaStatus()
           },
-          qqPortable: await qqPortableStatus(),
+          localQQ: { connected: localQQConnected(onebot.connected, getConfig().snowluma?.wsUrl || 'ws://127.0.0.1:3001') },
           orchestrator: orchestrator.statusSummary(),
           usage,
           cost,
@@ -265,7 +265,7 @@ export function createRoutes(deps) {
     },
     {
       method: 'GET', pattern: '/api/snowluma/logs',
-      handler: async ({ res, json }) => json(res, 200, { logs: snowlumaLogs.slice(-200) })
+      handler: async ({ res, json }) => json(res, 200, getSnowlumaLogs())
     },
     {
       method: 'POST', pattern: '/api/snowluma/stop',
@@ -297,37 +297,10 @@ export function createRoutes(deps) {
       }
     },
 
-    // ── 便携 QQ 进程管理 ─────────────────────────────────────────────
-    {
-      method: 'POST', pattern: '/api/qq-portable/launch',
-      handler: async ({ res, json }) => {
-        try {
-          const result = await launchPortableQQ();
-          return json(res, result.ok ? 200 : 400, result);
-        } catch (error) {
-          return json(res, 500, { ok: false, error: String(error?.message ?? error) });
-        }
-      }
-    },
-    {
-      method: 'POST', pattern: '/api/qq-portable/stop',
-      handler: async ({ res, json }) => {
-        try {
-          const result = await stopPortableQQ();
-          return json(res, result.ok ? 200 : 400, result);
-        } catch (error) {
-          return json(res, 500, { ok: false, error: String(error?.message ?? error) });
-        }
-      }
-    },
-    {
-      method: 'GET', pattern: '/api/qq-portable/logs',
-      handler: async ({ res, json }) => json(res, 200, { logs: qqPortableLogs.slice(-200) })
-    },
-    {
-      method: 'GET', pattern: '/api/qq-portable/status',
-      handler: async ({ res, json }) => json(res, 200, await qqPortableStatus())
-    },
+    { method: 'POST', pattern: '/api/qq/launch', handler: async ({ res, json }) => {
+      try { const result = await launchLocalQQ(); return json(res, result.ok ? 200 : 400, result); }
+      catch (error) { return json(res, 500, { error: error.message }); }
+    } },
 
     // ── 体检 / 引导 ──────────────────────────────────────────────────
     {
@@ -910,7 +883,7 @@ export function createRoutes(deps) {
         const code = String(body?.code || '').trim().toUpperCase();
         if (!/^[A-Z0-9]{4,12}$/.test(code)) return json(res, 400, { ok: false, error: '口令格式无效' });
         try {
-          const r = await installByCode({ code, verified: body?.entry || null, replaceExisting: body?.replaceExisting === true });
+          const r = await installByCode({ code, replaceExisting: body?.replaceExisting === true });
           // 安装完立即重扫，让新模块马上出现在页签里（热重载 watcher 也行，
           // 但目录删除重建的场景 watcher 会丢事件 —— reload 是唯一可靠路径）
           try { await reloadSkills({ reason: 'market-install' }); } catch { /* 重扫失败不影响安装结果 */ }
@@ -1450,6 +1423,11 @@ export function createRoutes(deps) {
       method: 'POST', pattern: /^\/api\/chats\/(group|private)_(\d+)\/mark-read$/,
       handler: async ({ res, json, match }) => json(res, 200, { ok: true, marked: store.drainUnread(`${match[1]}:${match[2]}`).length })
     },
+    { method: 'DELETE', pattern: /^\/api\/chats\/(group|private)_(\d+)$/, handler: async ({ res, json, match }) => {
+      const chatKey = `${match[1]}:${match[2]}`;
+      const removed = store.deleteChat(chatKey); emit('chat-update', chatKey);
+      return json(res, 200, { ok: true, removed });
+    } },
     {
       // 清空某会话的全部消息（整体清除存档）
       method: 'POST', pattern: /^\/api\/chats\/(group|private)_(\d+)\/clear$/,

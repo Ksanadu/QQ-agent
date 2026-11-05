@@ -91,123 +91,26 @@ plugins/my-plugin/            skills/my-skill/
   等价于"任意落地的 JS 会被执行"，共享机器建议关掉）。
 - 架构总览见 [doc/extend_development/skill-system.md](doc/extend_development/skill-system.md)。
 ## 安装与使用
-**Windows 桌面安装包（0.4.1）**：安装后打开 QQ Agent，在“设置 → OneBot（SnowLuma）”点击“一键安装 GitHub 最新版 SnowLuma”。程序从官方稳定 Release 下载 Windows x64 完整包并校验 SHA256，安装在 `data/dependencies/`，QQ Agent 安装包本身不捆绑 SnowLuma、QQ、模型权重或登录状态。安装完成后到 SnowLuma 页启动、打开其 WebUI，完成 QQ 接入与登录；OneBot 地址及令牌在设置中配置。
+**Windows 桌面安装包（0.4.1）**：安装后打开 QQ Agent，在“设置 → 界面系统 → OneBot（SnowLuma）”点击“一键安装 GitHub 最新版 SnowLuma”。程序从官方稳定 Release 下载 Windows x64 完整包并校验 SHA256，安装在 `data/dependencies/`，QQ Agent 安装包本身不捆绑 SnowLuma、QQ、模型权重或登录状态。安装完成后到 SnowLuma 页启动、打开其 WebUI，完成 QQ 接入与登录；OneBot 地址及令牌在设置中配置。
 
 已有 SnowLuma 正在运行时，先停止后再安装/更新。旧程序保留，新版本验证成功后才切换程序目录；原配置及登录数据复制到新目录。
 
 源码构建：`npm install` 后执行 `npm run build:desktop`；Windows x64 安装包输出到 `dist/`。验证记录见 [桌面版验收](doc/desktop-release-validation.md)。
 
-**三步搞定**（推荐）：
+源码安装：
 ```bash
-git clone https://github.com/Kondius/qq-agent.git
-cd qq-agent
+git clone https://github.com/Ksanadu/QQ-agent.git
+cd QQ-agent
 npm install
-npm run setup    # 自动下载 SnowLuma + 固定版本便携 QQ
+npm run setup        # 安装 SnowLuma，QQ 使用本机客户端
+npm run setup:check  # 检查 SnowLuma
+npm start            # 桌面端
+npm run server       # Web 端 http://127.0.0.1:3210
 ```
-然后双击 `启动QQ机器人.bat`（或 `npm start`），在 SnowLuma 页签点「启动 QQ」，扫码登录即可。
-**手动安装**（如果 `npm run setup` 下载失败）：
-1. **装协议端**：SnowLuma 是独立第三方项目（自带 EULA，不随本仓库分发），从其官方渠道获取后解压到项目根目录，目录名保持 `snowluma`
-2. **装便携 QQ**（可选）：
-   - **最省事**：机器上已经装过 QQ 的话，**先完全退出 QQ**，直接跑 `npm run setup` ——
-     脚本会从注册表找到已装的 QQ 并复制一份到 `runtime/qq-portable/`（约 1.6 GB，会自动跳过聊天记录）
-   - 否则：下载 <https://www.kondius.cn/netdisk/api/download/QQ_9.9.33_260813_x64_01.exe>
-     （约 300 MB），**正常双击安装一遍**，然后退出 QQ、重跑 `npm run setup`
-   - 为什么不能自动静默安装：QQ 9.9.x 用的是腾讯自研的 **HummerSetup** 安装器，
-     不接受 NSIS/Inno 的静默开关（脚本会识别出来并说明，而不是盲试到超时）
-3. **启动**：双击 `启动QQ机器人.bat`（或 `npm start`），扫码登录 QQ
-4. **配置**：设置页顶部体检卡会告诉你缺什么——填接口地址和 Key → 选模型 → 勾白名单
-```bash
-npm install          # 装依赖
-npm run setup        # 一键下载 SnowLuma + 便携 QQ（幂等，可重复执行）
-npm run setup:check  # 只检查是否已就绪
-npm start            # 桌面端启动
-npm run server       # headless 模式：浏览器打开 http://127.0.0.1:3210
-npm test              # 全量测试：自测 + Skill 架构 + 工具/Skill 审查 + 链接媒体转发 + 回复抢救 + 技能设置 + 表情上下文 + 技能弹窗 + 渲染 + 滚动 + 用量端到端 + 提示词
-npm run test:coverage # 覆盖测试（模块层 + 全部 HTTP 接口 + 端到端链路 + 静态界面层 + 界面接线）
-npm run test:all      # 两套一起跑
-npm run test:wiring   # 只跑「界面接线」检查（需要可选依赖，见下）
-```
-### 界面接线检查（可选依赖）
-`test/coverage-wiring.mjs` 用 jsdom 加载真实的 `ui/index.html` 并执行 `ui/app.js`，
-然后按用户的真实操作路径（点页签 / 点设置分区 / 打开各弹窗）遍历，断言
-**每一个交互元素（按钮、输入框、下拉框…）都有代码在管**，并回归验证
-「展开全部/收起」这类折叠按钮真的能开合。
-它依赖 jsdom，但 jsdom 不是本项目的依赖 —— 未安装时该测试会打印提示并**自动跳过**，
-不影响其它套件。想启用：
-```bash
-npm i -D jsdom      # 装完再跑 npm run test:wiring 即可
-```
-### QQ 怎么来的？（免安装包，推荐）
-QQ 9.9.x 用的是腾讯自研的 **HummerSetup** 安装器，**不支持静默安装**（会弹 GUI）。
-更麻烦的是：**机器上已有更新版本时，根本装不回指定版本**（会拒绝或直接升级掉），
-而且为了做个便携版去覆盖用户日常用的 QQ，代价也不对。
-所以 **QQ 以「免安装包」形式分发**：下载解压即用，**完全不需要安装 QQ**，
-也不触碰系统里已装的任何东西。
-```bash
-npm run setup          # 自动下载免安装包 → 校验 SHA256 → 解压 → 完成
-```
-免安装包的特点：
-- **不需要装 QQ**，解压约 1.5 GB，不写注册表、不装服务
-- **不与系统里已装的 QQ 冲突**（启动时带 `--user-data-dir`，数据完全隔离）
-- **不含任何用户数据**（聊天记录、登录态、账号 —— 一个字节都没有）
-- 剥离了运行日志与卸载器（卸载器指向原安装路径，带过去会误导）
-- 保留全部许可文件（`QQLicense.rtf` / `LICENSE.electron.txt` 等）
-#### 自己打包一份
-如果分发地址不可用，或你想用自己机器上的 QQ 版本：
-```bash
-npm run pack:qq                    # 打包 runtime/qq-portable → dist/QQ_portable.tar.zst
-npm run pack:qq -- --from D:\QQ    # 或从别处打包
-npm run pack:qq -- --keep-updates  # 保留待安装的更新包（默认剥离）
-```
-打包脚本会打印出归档的 SHA256 和两行可直接粘贴的配置（`QQ_PORTABLE_URL` / `QQ_PORTABLE_SHA256`）。
-把归档上传到任意可直链下载的地方即可。实测：**1.5 GB → 653 MB（42%），打包 24 秒**。
-> ⚠️ QQ 是腾讯公司的专有软件，版权与许可归腾讯所有。
-> 免安装包只是为了让「免安装」成为可能而做的**复制**，不含任何修改；
-> **再分发前请自行确认符合腾讯的许可条款**。本仓库不随代码分发 QQ 本体。
-#### 目标版本 vs 兜底安装包（两个不同的产物）
-| | 是什么 | 版本 |
-|---|---|---|
-| **目标版本** `QQ_VERSION` | 我们要求协议栈打交道的客户端版本；`EXPECTED_CLIENT_BUILD` 由它推导 | `9.9.33.51802` |
-| **免安装包** | 分发的主体，解压即用 | 里面就是 `9.9.33-51802` |
-| **兜底安装包** `QQ_9.9.33_260813_x64_01.exe` | 只在"免安装包拿不到 + 机器上也没装 QQ"时用（且必须手动双击装） | `260813` |
-兜底安装包的**文件名是写死的，不再由版本号拼接** —— 分发站上现存的就是 260813 那个包。
-用版本号拼的话一旦拼错，兜底下载会 404，而报错只会说"下载失败"，很难联想到是文件名不存在。
-#### 兜底：从机器上已装的 QQ 复制
-免安装包下载失败（比如没网、地址失效）时，会自动退回这条路：
-```bash
-# 完全退出 QQ（含托盘）后：
-npm run setup
-# 装在自定义路径时指定：
-npm run setup -- --from "D:\你装到哪"
-# 强制不用免安装包，就走复制：
-npm run setup -- --no-portable
-```
-脚本按「`--from` 指定 → 注册表/常见路径里**版本匹配**的那份 → 读不到版本的 → 版本不符的（会警告）」
-的顺序选来源，**不会随手拿第一个** —— 机器上同时有 QQ 9.7 和 9.9 时，拿错版本会表现为登录失败，
-排查方向会完全跑偏。
-### 为什么内置固定版 QQ？
-- **版本锁定与对齐**：SnowLuma 协议栈里写死了两处"我是谁"的声明
-  （`CLIENT_BUILD`、`BUILD_VERSION_SHORT`），用来在握手时自称客户端版本。
-  `npm run setup` 会把它们**对齐到你实际运行的 QQ 版本**（当前 `9.9.33-51802`），
-  这样声明与实际一致，也不会再报版本不匹配。
-  - 只是握手自报家门的字段，**不参与任何协议分支选择**（全文只有 2 处引用，都在自定义表情服务里）
-  - 改之前备份成 `snowluma/index.mjs.orig`；需要还原就把它盖回去
-  - 关掉对齐：`set QQ_ALIGN_CLIENT_BUILD=0 && npm run setup`
-  - 之所以做在 setup 里而不是手改：`snowluma/` 是下载来的，重新 setup 会覆盖掉手改的改动
-- **下载源**：从 <https://www.kondius.cn/netdisk/api/download/> 取安装包
-  （不依赖腾讯 CDN 的文件名规则，也不会因 CDN 清档而 404）。
-  目标版本 `9.9.33.51802`（免安装包里的就是这一版）。
-- **完整性校验**：安装包的 SHA256 已固定（`B25C0D3C…EC492`，2026-09-13 实测下载并校验）。
-  换版本/换源时要**同步改掉它**，否则每次 setup 都会以"校验失败"告终；
-  也可以设空 `QQ_X64_SHA256` 临时跳过（跳过后会打印实际哈希，方便重新固定）。
-- **安装器类型**：QQ 9.9.x 用的是腾讯自研 **HummerSetup**（不是 NSIS/Inno），
-  `/s /D=` 这类开关无效。脚本会识别类型，对这类安装器**不去盲试**，
-  而是改用"复制机器上已装的 QQ"这条路（做便携运行靠的是 `--user-data-dir`，不需要干净副本）。
-- **完全隔离**：便携 QQ 使用独立 `--user-data-dir`，与用户日常 QQ 互不干扰
-- **精准控制**：关闭时只杀路径匹配 `runtime/qq-portable` 的进程，绝不碰用户已登录的 QQ
-> ⚠️ **换 QQ 版本前先看这里**：如果登录被拒或接口行为异常，优先怀疑版本不匹配，
-> 而不是网络或账号。setup 的提示里会给出两个方向 ——
-> 换回与协议栈匹配的 QQ 版本，或换一个与当前 QQ 版本匹配的 SnowLuma。
+QQ 客户端由用户自行安装。SnowLuma 页的“单独启动 QQ”会打开本机安装的 QQ；本项目不再下载、复制或管理便携 QQ 内核，也不提供关闭 QQ 的接口。本机 OneBot 连接成功后，QQ 指示灯变绿。
+
+设置分区为模型 API、搜索服务、聊天设置、记忆人设、界面系统、工具技能、会话存档。白名单与屏蔽在聊天设置底部；会话存档按群聊/私聊列卡，可查看或删除本地消息记录。技能与插件共用页面，支持混合口令自动校验和安装。
+
 ### 风险与免责声明
 - 本项目通过非官方方式接入 QQ 协议，**账号存在被风控/封禁的风险**，建议使用小号
 - SnowLuma 是独立第三方项目，受其自身 EULA 约束，本项目不分发其代码

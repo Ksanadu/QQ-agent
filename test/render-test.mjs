@@ -210,16 +210,10 @@ const ctx = vm.createContext(sandbox);
   // 光看"返回非空字符串"是不够的：两页都用同一个渲染函数，
   // 万一 kind 过滤写错（比如两页都渲染全部），函数照样返回字符串、测试照样通过。
   // 所以这里逐条断言"该出现的出现、不该出现的不出现"。
-  console.log('\n=== 技能页 / 插件页的类型隔离 ===');
+  console.log('\n=== 合并技能与插件页面 ===');
   for (const [kindTag, fnName, mustHave, mustNotHave] of [
-    ['skill',
-      'renderSkillsPage',
-      ['正常技能', '已关闭技能', '依赖未就绪'],          // 3 条 kind='skill'
-      ['正常插件', '入口写错的插件']],                    // 2 条 kind='plugin'
-    ['plugin',
-      'renderPluginsPage',
-      ['正常插件', '入口写错的插件'],                     // 2 条 kind='plugin'
-      ['正常技能', '已关闭技能', '依赖未就绪']]
+    ['all', 'renderSkillsPage', ['正常技能', '已关闭技能', '依赖未就绪', '正常插件', '入口写错的插件'], []],
+    ['legacy-alias', 'renderPluginsPage', ['正常技能', '正常插件'], []]
   ]) {
     const fn = ctx[fnName] || sandbox[fnName];
     if (typeof fn !== 'function') { fail++; console.log(`  FAIL  ${fnName} 未定义`); continue; }
@@ -245,7 +239,7 @@ const ctx = vm.createContext(sandbox);
   console.log('\n=== 添加入口 ===');
   for (const [fnName, addId, label] of [
     ['renderSkillsPage', 'skills-add-btn', '添加技能'],
-    ['renderPluginsPage', 'plugins-add-btn', '添加插件']
+    ['renderPluginsPage', 'skills-add-btn', '添加技能/插件']
   ]) {
     const fn = ctx[fnName] || sandbox[fnName];
     if (typeof fn !== 'function') { fail++; console.log(`  FAIL  ${fnName} 未定义`); continue; }

@@ -284,13 +284,15 @@ export async function verifyInstallCodes(codes) {
  * 类型路由由**服务器返回的 type** 决定（skill.json→skill / plugin.json→plugin），
  * 前端/调用方无法干预 —— 即使在技能页输入了插件的口令，也装进 plugins/。
  *
- * @param {object} o { code, verified(校验阶段拿到的条目信息) }
+ * @param {object} o { code, replaceExisting }
  * @returns {Promise<{ok, kind, id, dir}>}
  */
-export async function installByCode({ code, verified, replaceExisting = false }) {
-  const entry = verified && verified.ok ? verified : null;
+export async function installByCode({ code, replaceExisting = false }) {
+  const normalizedCode = String(code || '').trim().toUpperCase();
+  const entry = (await verifyInstallCodes([normalizedCode])).find(r => r.code === normalizedCode && r.ok);
+  if (!entry || !['skill', 'plugin'].includes(entry.type)) throw new Error('口令无效或扩展类型无法识别');
   const type = String(entry?.type || '').toLowerCase() === 'plugin' ? 'plugin' : 'skill';
-  // 先下载（没传 verified 也重新校验一次拿 type —— 不信任何本地猜测）
+  // 下载前重新校验口令，安装类型只采用服务端结果。
   const ident = entry?.id;
   const res = await fetch(`${MARKET_API_BASE}/install/${encodeURIComponent(String(code).trim().toUpperCase())}/download`, {
     signal: AbortSignal.timeout(120000)

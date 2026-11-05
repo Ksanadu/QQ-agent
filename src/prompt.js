@@ -543,7 +543,7 @@ function collectMemberIds(messages) {
 /**
  * 组装一次运行的用户消息（不携带任何 LLM 对话历史）。
  * ctx: { chatKey, kind, chatId, chatName, triggerEntries, stickerEntries, selfNickname,
- *        contextLimit, tierInfo, activeTopic, memory, store, session, proactive,
+ *        contextLimit, tierInfo, memory, store, session, proactive,
  *        promptAnchor: { prev, maxExtraRead } }（prev = 上一轮锚点状态，orchestrator 维护）
  */
 export function buildUserPrompt(ctx) {
@@ -712,21 +712,6 @@ export function buildUserPrompt(ctx) {
       const newMemText = ctx.memory.formatForPrompt(ctx.chatKey, { userIds: newMembers });
       if (newMemText) parts.push(`【新加入成员】以下是这轮新加入话题的群友，你对他们的印象：\n${newMemText}`);
     }
-  }
-
-  // ── 活跃模式（chatActive）────────────────────────────────────────────
-  // 开关开启且本次触发的档位是 1/2/3 档时，orchestrator 会记录一个"活跃话题"
-  // （第一次触发时由本段提示模型输出话题总结，LLM 侧的 finish 工具带回）。
-  // 处于活跃期时这里注入两行：话题锚点 + 偏离判断要求 —— 模型每次先判断
-  // "群聊是否还在这个大方向上"，是则正常接话，否则调 finish 结束活跃。
-  if (ctx.activeTopic) {
-    parts.push([
-      '【活跃模式】当前处于"活跃期"：群里正在聊的话题大方向是',
-      `「${ctx.activeTopic}」`,
-      '——这是你上次开启活跃期时总结的。先判断：【未读信息】和【已读信息】的聊天是否仍围绕这个大方向（或自然衍生）？',
-      '· 仍在方向上：正常接话，保持参与。',
-      '· 已偏离去别的话题 / 没人在聊了：立刻调用 finish 结束（参数 reason 填"话题结束"），回到潜水状态；不要为了延续而硬拉话题。'
-    ].join(' '));
   }
 
   // 回复风格遵循【角色设定】，此处不追加通用参与/回复准则。

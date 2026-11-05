@@ -860,18 +860,13 @@ function registerAllTools() {
     parameters: {
       type: 'object',
       properties: {
-        summary: { type: 'string', description: '一句话说明你这次的决定（只记录给管理端看，不会发送）。活跃期判断话题结束时填"话题结束"' },
-        activeTopic: { type: 'string', description: '开启活跃期时才填：用一句话概括当前聊天的话题大方向（15字内，如"周末去哪玩"）。仅在【活跃模式】未激活、而这次对话确实值得你持续参与时填写；平时不要填。' }
+        summary: { type: 'string', description: '一句话说明你这次的决定（只记录给管理端看，不会发送）' }
       },
       required: ['summary']
     },
     async execute(ctx, args) {
       if (!hasSendMessageDelivery(ctx)) return err(DELIVERY_REQUIRED);
       ctx.session.finishReason = String(args.summary ?? '').slice(0, 300);
-      // 活跃模式（chatActive）：模型在 finish 时带回话题总结。
-      // orchestrator 读取 session.activeTopic 决定是否开启/维持活跃期。
-      const topic = String(args.activeTopic ?? '').trim();
-      if (topic) ctx.session.activeTopic = topic.slice(0, 60);
       return ok({ finished: true });
     }
   });

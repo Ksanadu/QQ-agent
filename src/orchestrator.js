@@ -60,13 +60,6 @@ export class Orchestrator {
     this.sessionAbortMarks = new Set(); // 用户请求中止的 sessionId（abortSession 打标记，#runAgent 每轮检查）
     this.sessionAbortControllers = new Map(); // sessionId -> AbortController（中止时中断在途 LLM 请求）
     this.runSeq = new Map();           // chatKey -> 第几次处理（跨重启清零即可）
-    // ── 活跃模式（chatActive）──
-    // chatKey -> { topic, until }：活跃期状态（话题锚点 + 到期时间）。
-    // 1/2/3 档触发响应且模型 finish 时带回 activeTopic → 进入活跃期：
-    // 活跃期内该群的唤醒忽略档位判定（必响应），提示词注入话题锚点让模型
-    // 自判"是否仍在话题上"，偏离/结束则 finish("话题结束") 退出活跃期。
-    // 到期自动退出兜底（LLM 忘了判断也不会永远活跃）。
-    this.activeTopics = new Map();
     // ── 提示词锚点（前缀缓存深化，2026-09-25）──
     // chatKey -> { readIds, readCount, memberIds }：上一轮发给模型的
     // 【记忆】+【已读信息】前缀状态。下一轮 buildUserPrompt 据此判断能否
@@ -226,31 +219,27 @@ export class Orchestrator {
     // 前置条件（与 wake 的闸门同口径，在这里提前拦截可以少建一次定时器）：
     //   模型未设置 → 消息保留未读，设置后（下一条消息或恢复积压）自动补处理
     if (!String(cfg.api.model || '').trim()) return;
-    // 活跃期内的群：必响应，视作触发（与旧版"跳过判定"语义一致）
-    const active = this.#activeState(chatKey);
-    if (!active) {
-      const tierResult = resolveContextTier({
-        triggerEntries: entry ? [entry] : (this.store.peekUnread(chatKey, 1) || []),
-        selfNickname: cfg.persona?.selfNickname || this.onebot.selfNickname || '',
-        botName: cfg.persona?.botName || '',
-        selfId: cfg.onebot?.selfId || this.onebot.selfId || '',
-        cfg: storeConfigForChat(chatKey),
-        isPrivate: String(chatKey).startsWith('private:'),
-        // 单条判定当场掷骰、当场出结果 —— 没有"预判/实跑"两阶段了，
-        // 骰子结果由 resolveContextTier 的 reason 带回（含当时的值）。
-        roll: null
-      });
-      if (!tierResult.shouldRespond) {
-        // 不触发：这条消息立即标已读（只标这一条，不动窗口外已积压的未读——
-        // 那些是上一批遗留，由兜底定时器/下一次触发处理）。
-        if (entry) {
-          this.store.markEntryRead(chatKey, entry.id);
-        } else {
-          this.store.markAllRead(chatKey);
-        }
-        this.emit('chat-update', chatKey);
-        return;
+    const tierResult = resolveContextTier({
+      triggerEntries: entry ? [entry] : (this.store.peekUnread(chatKey, 1) || []),
+      selfNickname: cfg.persona?.selfNickname || this.onebot.selfNickname || '',
+      botName: cfg.persona?.botName || '',
+      selfId: cfg.onebot?.selfId || this.onebot.selfId || '',
+      cfg: storeConfigForChat(chatKey),
+      isPrivate: String(chatKey).startsWith('private:'),
+      // 单条判定当场掷骰、当场出结果 —— 没有"预判/实跑"两阶段了，
+      // 骰子结果由 resolveContextTier 的 reason 带回（含当时的值）。
+      roll: null
+    });
+    if (!tierResult.shouldRespond) {
+      // 不触发：这条消息立即标已读（只标这一条，不动窗口外已积压的未读——
+      // 那些是上一批遗留，由兜底定时器/下一次触发处理）。
+      if (entry) {
+        this.store.markEntryRead(chatKey, entry.id);
+      } else {
+        this.store.markAllRead(chatKey);
       }
+      this.emit('chat-update', chatKey);
+      return;
     }
 
     // 触发：进入可由唤醒者续期的"等待中"倒计时。verified 标记让 wake 知道
@@ -335,26 +324,6 @@ export class Orchestrator {
     }, ms);
     this.wakeTimers.set(chatKey, timer);
   }
-
-  /**
-   * 活跃模式：取某个会话的活跃期状态；到期/开关关闭时清理并返回 null。
-   * 返回 { topic, until } 或 null。
-   */
-  #activeState(chatKey) {
-    const cfg = getConfig();
-    if (cfg.conversationListener?.enabled !== false || cfg.chatActive?.enabled !== true) {
-      if (this.activeTopics.size) this.activeTopics.delete(chatKey);
-      return null;
-    }
-    const st = this.activeTopics.get(chatKey);
-    if (!st) return null;
-    if (Date.now() > Number(st.until) || !String(st.topic || '').trim()) {
-      this.activeTopics.delete(chatKey);
-      return null;
-    }
-    return st;
-  }
-
 
   // ── 未读兜底（已随 2026-09-25 触发链路重做移除）────────────────────────
   // 旧语义：1~3 档下"没触发会话"的散消息在防抖窗口后由定时器批量标已读。
@@ -486,7 +455,6 @@ export class Orchestrator {
       //     （2026-09-25 晚的 tier 0 垃圾会话事故就是它）。
       let batchFloorTs = Infinity;
       let hasTrigger = false;
-      const active = this.#activeState(chatKey);
       const approved = probe.filter(m => this.listenerRelevant.get(chatKey)?.has(m.id));
       if (approved.length) {
         batchFloorTs = Math.min(...approved.map(m => m.ts)); hasTrigger = true;
@@ -496,7 +464,7 @@ export class Orchestrator {
           if (waiting?.startedAt) batchFloorTs = Math.min(batchFloorTs, Number(waiting.startedAt) - 60_000);
         }
         hasTrigger = true;   // onIncoming 判定过"触发"，批内必然有触发消息
-      } else if (!active) {
+      } else {
         // 补判定：对每条未读单独跑 resolveContextTier（与 onIncoming 同口径）
         for (const m of probe) {
           const r = resolveContextTier({
@@ -510,9 +478,6 @@ export class Orchestrator {
           });
           if (r.shouldRespond) { batchFloorTs = m.ts; hasTrigger = true; break; }   // 最早的触发消息定边界
         }
-      } else {
-        // 活跃期：必响应，边界 = 最早的未读
-        if (probe.length) { batchFloorTs = probe[0].ts; hasTrigger = true; }
       }
 
       if (!hasTrigger) {
@@ -580,14 +545,9 @@ export class Orchestrator {
         isPrivate: String(chatKey).startsWith('private:'),   // 私聊恒响应
         roll: null
       });
-    // 活跃期覆盖：必响应，读取条数与其余档位一致（统一 historyCount），
-    // reason 标注活跃来源，会话页可解释"为什么 1 档设置却响应了"。
-    const activeState = this.#activeState(chatKey);
     const fromListener = triggerEntries.some(m => this.listenerRelevant.get(chatKey)?.has(m.id));
     const effectiveTier = fromListener
       ? { tier: 3, count: Math.max(0, Number(storeConfigForChat(chatKey).historyCount) || 80), reason: '关联监听：LLM 确认在继续当前对话', shouldRespond: true }
-      : activeState
-      ? { tier: 3, count: Math.max(0, Number(storeConfigForChat(chatKey).historyCount) || 80), reason: `活跃期（话题：${activeState.topic}）`, shouldRespond: true }
       : tierResult;
 
     this.runningChats.add(chatKey);
@@ -654,7 +614,7 @@ export class Orchestrator {
     try {
       for (let attempt = 1; attempt <= MAX_SESSION_ATTEMPTS; attempt++) {
         try {
-          await this.#runAgent(session, { kind, chatId, chatKey, triggerEntries, proactive, seq, contextLimit: effectiveTier.count, tierInfo: effectiveTier, activeTopic: activeState ? activeState.topic : null });
+          await this.#runAgent(session, { kind, chatId, chatKey, triggerEntries, proactive, seq, contextLimit: effectiveTier.count, tierInfo: effectiveTier });
           lastError = null;
           break;
         } catch (error) {
@@ -806,7 +766,7 @@ export class Orchestrator {
     });
   }
 
-  async #runAgent(session, { kind, chatId, chatKey, triggerEntries, proactive, seq, contextLimit = null, tierInfo = null, activeTopic = null }) {
+  async #runAgent(session, { kind, chatId, chatKey, triggerEntries, proactive, seq, contextLimit = null, tierInfo = null }) {
     const cfg = getConfig();
     // 提示词和实际发送共用本轮固定窗口，运行中到达的新消息不能扩大权限。
     const reactionMessages = captureReactionTargets({ triggerEntries, chatKey, store: this.store });
@@ -907,8 +867,6 @@ export class Orchestrator {
       contextLimit,
       tierInfo,
       skillContext,
-      // 活跃模式：注入当前话题锚点（buildUserPrompt 据此渲染【活跃模式】段）
-      activeTopic,
       // 提示词锚点：传入上一轮的前缀状态；新状态经 session.promptAnchorState 带回
       promptAnchor: { prev: this.promptAnchors.get(chatKey) || null },
       session
@@ -1289,32 +1247,6 @@ export class Orchestrator {
         this.emit('session-update', session.id);
         if (name === 'finish' && !result.isError && hasSendMessageDelivery(ctx)) {
           finish = true;
-          // ── 活跃模式状态机 ──
-          // 模型 finish 时带回的 activeTopic / "话题结束" 决定活跃期走向：
-          //   · 带回 activeTopic 且本次 tier 是 1/2/3（被召唤后才可能开活跃）→ 开启活跃期
-          //   · 活跃期中 finish("话题结束") → 退出活跃期（回到正常档位）
-          //   · 活跃期中 finish 且没带新 topic → 话题延续，刷新到期时间
-          if (!proactive) {
-            const cfgA = getConfig();
-            const enabled = cfgA.chatActive?.enabled === true;
-            const t = tierInfo?.tier;
-            const eligibleTier = Number.isFinite(Number(t)) && t >= 1 && t <= 3;
-            const topic = String(session.activeTopic ?? '').trim();
-            const reason = String(session.finishReason ?? '');
-            const st = this.#activeState(chatKey);
-            if (enabled && topic && eligibleTier) {
-              const ttlMs = Math.max(60000, Number(cfgA.chatActive?.ttlMinutes) || 30) * 60000;
-              this.activeTopics.set(chatKey, { topic: topic.slice(0, 60), until: Date.now() + ttlMs });
-              console.log(`[orchestrator] ${chatKey} 进入活跃期（话题：${topic.slice(0, 60)}，${Math.round(ttlMs / 60000)} 分钟）`);
-            } else if (st && /话题(结束|终止|偏离)/.test(reason)) {
-              this.activeTopics.delete(chatKey);
-              console.log(`[orchestrator] ${chatKey} 活跃期结束（模型判断话题结束）`);
-            } else if (st && !topic) {
-              // 活跃期内的普通 finish：话题仍在，刷新到期
-              const ttlMs = Math.max(60000, Number(cfgA.chatActive?.ttlMinutes) || 30) * 60000;
-              this.activeTopics.set(chatKey, { ...st, until: Date.now() + ttlMs });
-            }
-          }
         }
       }
 

@@ -31,6 +31,7 @@ function flushSettingsSaves() {
 }
 
 function bindSettingsEvents(c) {
+  if (state.settingsSection === 'archive') bindArchiveSettings();
   /* ── 即时保存：任何设置项变动 → 防抖 600ms 自动保存 ──
      变动的设置块背景变成流动的浅黄色渐变（.dirty-glow）。
      黄条的消退时机：**切换设置区块或主页签时**（renderSettings 重渲染会重建

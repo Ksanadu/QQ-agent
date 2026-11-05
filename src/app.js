@@ -1,3 +1,5 @@
+import { launchLocalQQ, localQQConnected } from './local-qq.js';
+import { readSnowlumaLogs } from './snowluma-logs.js';
 // 总装：OneBot 事件接入 → 存储 → 编排器；HTTP API + SSE 给 UI。
 // Electron 主进程与 headless 服务器都从这里启动。
 import http from 'node:http';
@@ -229,6 +231,12 @@ export function createApp({ log = console.log } = {}) {
     return { embedded: !!snowlumaProc, pid: snowlumaProc?.pid ?? null };
   }
 
+  function getSnowlumaLogs() {
+    if (snowlumaProc) return readSnowlumaLogs(snowlumaDir(), snowlumaLogs);
+    const disk = readSnowlumaLogs(snowlumaDir());
+    return disk.logs.length || disk.error ? disk : readSnowlumaLogs(snowlumaDir(), snowlumaLogs);
+  }
+
   /** 关闭 SnowLuma。内置拉起的直接 kill；外部启动的（launcher.bat / 手动 node）按
    *  「命令行含 <snowluma目录>\index.mjs」匹配进程后 taskkill —— 否则 UI 的「停止」
    *  对外启动实例毫无作用，用户只能去任务管理器，而残留实例会继续抢占管道与端口。
@@ -279,217 +287,6 @@ export function createApp({ log = console.log } = {}) {
       pushSnowlumaLog(`关闭外部 SnowLuma 失败：${error?.message ?? error}`, 'stderr');
       return false;
     }
-  }
-
-  // ── 便携 QQ 进程管理 ──
-  // 便携 QQ 与用户日常 QQ 完全隔离：独立安装目录 + 独立 user-data-dir。
-  // 绝不 taskkill QQ.exe 全名——只杀路径匹配 runtime/qq-portable 的进程。
-  const qqPortableLogs = [];
-  let qqPortableProc = null;
-  let qqPortableLaunching = false;   // 便携 QQ 启动互斥标记（防连点「启动 QQ」并发拉起）
-
-  function qqPortableDir() {
-    return path.join(ROOT, 'runtime', 'qq-portable');
-  }
-
-  function qqPortableDataDir() {
-    return path.join(ROOT, 'runtime', 'qq-portable-data');
-  }
-
-  function qqPortableExe() {
-    return path.join(qqPortableDir(), 'QQ.exe');
-  }
-
-  function pushQqLog(text, stream = 'stdout') {
-    const line = { at: Date.now(), stream, text: String(text ?? '').replace(/\r?\n$/, '') };
-    if (!line.text) return;
-    qqPortableLogs.push(line);
-    if (qqPortableLogs.length > 500) qqPortableLogs.splice(0, qqPortableLogs.length - 500);
-    emit('qq-portable-log', line);
-  }
-
-  /** 检查便携 QQ 是否已安装 */
-  function qqPortableReady() {
-    return fs.existsSync(qqPortableExe());
-  }
-
-  /** 列出所有 QQ.exe 进程，返回 [{ pid, path }]（Windows only） */
-  /**
-   * 列出所有 QQ.exe 进程，返回 [{ pid, path }]（Windows only）。
-   *
-   * ── 这里踩过一个很隐蔽的坑，务必别再改回去 ──────────────────────────
-   * 原来首选 `wmic process ... /format:csv`。它有两个问题：
-   *
-   * 1. **编码**：wmic 按**系统 ANSI 代码页（中文系统是 GBK）**输出，
-   *    而 Node 按 UTF-8 读 —— 路径里的中文会变成乱码。
-   *    实测：`qq-agent - 副本` → `qq-agent - ????`。
-   *    于是拿乱码路径去和真实路径比，**永远比不上**，
-   *    表现就是"QQ 明明在跑，界面却说未启动"。
-   *    ⚠️ 纯英文路径下这个 bug 完全不暴露，所以特别难查。
-   * 2. **CSV**：路径里有逗号就会错位。
-   * 3. 而且 wmic 在 Win11 24H2+ 已被移除，本来也不能当主路径。
-   *
-   * 现在改用 PowerShell + **显式强制 UTF-8 输出** + JSON。
-   * ⚠️ 只写 PowerShell 是不够的：PS 5.1 默认同样按 ANSI 输出，
-   *    必须带上 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`
-   *    （这行是实测对比出来的，去掉就又是乱码）。
-   * 用 JSON 而不是 CSV，顺带解决逗号错位。
-   */
-  async function listQqProcesses() {
-    if (process.platform !== 'win32') return [];
-    const { execFile } = await import('node:child_process');
-    const { promisify } = await import('node:util');
-    const execFileAsync = promisify(execFile);
-    try {
-      const { stdout } = await execFileAsync('powershell', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-          + 'Get-CimInstance Win32_Process -Filter "name=\'QQ.exe\'" | '
-          + 'Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress'
-      ], { timeout: 20000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
-      const txt = String(stdout).trim();
-      if (!txt) return [];
-      const data = JSON.parse(txt);
-      const arr = Array.isArray(data) ? data : [data];
-      return arr
-        .map((p) => ({ pid: Number(p.ProcessId), path: String(p.ExecutablePath ?? '') }))
-        .filter((p) => p.pid > 0);
-    } catch {
-      // 查不到就当没有。**不要**在这里退回 wmic —— 它给的乱码路径会导致
-      // "误判为别的 QQ"或"漏判本机的便携 QQ"，比返回空更糟。
-      return [];
-    }
-  }
-
-  /** 检查便携 QQ 是否在运行（按路径匹配，不碰用户 QQ） */
-  // 进程查询（PowerShell Get-CimInstance）可达数秒；SnowLuma 页/SSE/轮询会反复打
-  // /api/status，每次都查一遍会把整页拖死。结果缓存 3 秒。
-  let qqPidCache = { at: 0, pid: undefined };
-  async function qqPortableRunningPid() {
-    // 1) 本进程拉起过的那个：spawn 时就拿到 pid 了，不用查系统 ——
-    //    最快，也不受任何编码/权限问题影响。
-    if (qqPortableProc && !qqPortableProc.killed) {
-      try {
-        process.kill(qqPortableProc.pid, 0);   // signal 0 = 只探测存活
-        qqPidCache = { at: Date.now(), pid: qqPortableProc.pid };
-        return qqPortableProc.pid;
-      } catch { /* 已退出，往下走 */ }
-    }
-    // 缓存：3 秒内复用上次结果（启动/关闭后靠 SSE 状态事件立即刷新）
-    if (qqPidCache.pid !== undefined && Date.now() - qqPidCache.at < 3000) {
-      return qqPidCache.pid;
-    }
-    // 2) 查系统：覆盖"上次启动的 QQ 还在跑，但应用重启过"的情况
-    const portableDir = qqPortableDir().toLowerCase();
-    const procs = await listQqProcesses();
-    const match = procs.find((p) => p.path.toLowerCase().startsWith(portableDir));
-    const pid = match?.pid ?? null;
-    qqPidCache = { at: Date.now(), pid };
-    return pid;
-  }
-
-  /** 启动便携 QQ（如已在运行则跳过） */
-  async function launchPortableQQ() {
-    if (!qqPortableReady()) {
-      return { ok: false, error: '便携 QQ 未安装：请先运行 npm run setup' };
-    }
-    // 启动互斥：连点「启动 QQ」时，第一次还在 spawn，第二次直接拒绝
-    if (qqPortableLaunching) {
-      pushQqLog('便携 QQ 正在启动中，忽略重复的启动请求');
-      return { ok: true, alreadyRunning: true, launching: true };
-    }
-    const existingPid = await qqPortableRunningPid();
-    if (existingPid) {
-      pushQqLog(`便携 QQ 已在运行（pid=${existingPid}），无需重复启动`);
-      return { ok: true, alreadyRunning: true, pid: existingPid };
-    }
-
-    qqPortableLaunching = true;
-    try {
-      const exe = qqPortableExe();
-      const dataDir = qqPortableDataDir();
-      fs.mkdirSync(dataDir, { recursive: true });
-
-      try {
-        const child = spawn(exe, [`--user-data-dir=${dataDir}`], {
-          cwd: qqPortableDir(),
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: false, // QQ 需要显示窗口让用户扫码
-          detached: true
-        });
-        qqPortableProc = child;
-        child.unref();
-        pushQqLog(`便携 QQ 启动中（pid=${child.pid}），数据目录：${dataDir}`);
-        child.stdout?.on('data', (d) => {
-          for (const line of String(d).split(/\r?\n/)) {
-            if (line.trim()) pushQqLog(line, 'stdout');
-          }
-        });
-        child.stderr?.on('data', (d) => {
-          for (const line of String(d).split(/\r?\n/)) {
-            if (line.trim()) pushQqLog(line, 'stderr');
-          }
-        });
-        child.on('exit', (code, signal) => {
-          qqPortableProc = null;
-          pushQqLog(`便携 QQ 进程已退出（code=${code ?? ''} signal=${signal ?? ''}）`, 'stderr');
-          emit('qq-portable-status', { running: false, pid: null });
-        });
-        child.on('error', (error) => {
-          pushQqLog(`便携 QQ 启动失败：${error?.message ?? error}`, 'stderr');
-        });
-        emit('qq-portable-status', { running: true, pid: child.pid });
-        return { ok: true, launched: true, pid: child.pid };
-      } catch (error) {
-        pushQqLog(`便携 QQ 启动失败：${error?.message ?? error}`, 'stderr');
-        return { ok: false, error: String(error?.message ?? error) };
-      }
-    } finally {
-      qqPortableLaunching = false;
-    }
-  }
-
-  /** 关闭便携 QQ（只杀路径匹配的 PID，绝不碰用户 QQ） */
-  async function stopPortableQQ() {
-    const pid = await qqPortableRunningPid();
-    if (!pid) {
-      pushQqLog('便携 QQ 未在运行');
-      return { ok: true, stopped: false, reason: 'not_running' };
-    }
-    try {
-      process.kill(pid, 'SIGTERM');
-      pushQqLog(`已请求关闭便携 QQ（pid=${pid}）`);
-      // 等待进程退出
-      for (let i = 0; i < 10; i++) {
-        await new Promise((r) => setTimeout(r, 500));
-        const still = await qqPortableRunningPid();
-        if (!still) {
-          pushQqLog('便携 QQ 已退出');
-          emit('qq-portable-status', { running: false, pid: null });
-          return { ok: true, stopped: true, pid };
-        }
-      }
-      // 还没退，强制 kill
-      process.kill(pid, 'SIGKILL');
-      pushQqLog(`便携 QQ 已强制结束（pid=${pid}）`);
-      emit('qq-portable-status', { running: false, pid: null });
-      return { ok: true, stopped: true, pid, forced: true };
-    } catch (error) {
-      pushQqLog(`关闭便携 QQ 失败：${error?.message ?? error}`, 'stderr');
-      return { ok: false, error: String(error?.message ?? error) };
-    }
-  }
-
-  /** 便携 QQ 状态摘要 */
-  async function qqPortableStatus() {
-    const pid = await qqPortableRunningPid();
-    return {
-      ready: qqPortableReady(),
-      running: pid !== null,
-      pid,
-      dir: qqPortableDir(),
-      dataDir: qqPortableDataDir()
-    };
   }
 
   /** 拉起 SnowLuma。优先用项目内置 node.exe 直接运行（日志进内置控制台）；失败再回退到独立窗口 launcher.bat。 */
@@ -1320,7 +1117,8 @@ export function createApp({ log = console.log } = {}) {
     readBody, authorize,
     snowlumaDir, snowlumaWsPort, snowlumaWebuiUrl, snowlumaWebuiPort, snowlumaStatus, snowlumaLogs,
     launchSnowluma, stopSnowluma,
-    qqPortableStatus, qqPortableLogs, launchPortableQQ, stopPortableQQ,
+    launchLocalQQ, localQQConnected,
+    getSnowlumaLogs,
     visionScan, isPortOpen,
     buildUsageStats, buildUsageBreakdown,
     reloadSkills
@@ -1682,14 +1480,13 @@ export function createApp({ log = console.log } = {}) {
     // 下次启动会读到完整文件。
     try { snowlumaProc?.kill(); } catch { /* ignore */ }
     // 便携 QQ：默认保留运行（避免误杀用户登录态），如需清理可在 UI 手动关闭
-    // try { await stopPortableQQ(); } catch { /* ignore */ }
     logger.flush();
     // 解绑本次 createApp 的日志转发器，避免 Electron/测试重复创建 app 时监听器累积。
     try { removeAppLogListener?.(); } catch { /* ignore */ }
     releaseInstanceLock();
   }
 
-  return { server, onebot, store, memory, stickers, sender, sessions, orchestrator, start, stop, emit, getConfig, updateConfig, launchSnowluma, stopSnowluma, snowlumaStatus, launchPortableQQ, stopPortableQQ, qqPortableStatus, reloadSkills };
+  return { server, onebot, store, memory, stickers, sender, sessions, orchestrator, start, stop, emit, getConfig, updateConfig, launchSnowluma, stopSnowluma, snowlumaStatus, launchLocalQQ, reloadSkills };
 }
 
 /**

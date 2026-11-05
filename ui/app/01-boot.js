@@ -37,16 +37,15 @@ function updateReadinessDots(s) {
   const dots = $$('#readiness-dots .rdot');
   if (dots.length !== 4) return;
 
-  const qq = s?.qqPortable || {};
-  const qqRunning = !!qq.running;
+  const qqRunning = !!s?.localQQ?.connected;
   const slRunning = !!s?.snowluma?.running;
   const obConnected = !!s?.onebot?.connected;
   const cfg = state.config || {};
   const cfgReady = !!(cfg.api?.baseUrl && cfg.api?.model && (cfg.allow?.groups?.length || cfg.allow?.private?.length || cfg.allowAllWhenEmpty));
 
-  // 圆点 0：QQ 内核
+  // 圆点 0：本机 QQ
   dots[0].className = 'rdot' + (qqRunning ? ' on' : '');
-  dots[0].title = qqRunning ? 'QQ 内核运行中' : 'QQ 内核未运行（点击前往启动）';
+  dots[0].title = qqRunning ? '本机 QQ 已连接' : '本机 QQ 未连接（点击前往启动）';
 
   // 圆点 1：SnowLuma
   dots[1].className = 'rdot' + (slRunning ? ' on' : '');

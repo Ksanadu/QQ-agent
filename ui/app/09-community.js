@@ -216,8 +216,7 @@ function createTierBar({ mount, dual = false, low = 100, high = 10, onChange = n
 /**
  * 「活跃设置」编辑器（2026-09-24 改版：从两级模态框整体搬进聊天设置的
  * 「活跃设置」折叠卡内联展示 —— 「打开活跃设置编辑器」按钮与两个模态框取消，
- * 原「档位设置」子模态框的内容（各档条数 / 关键词表 / 被召唤后持续参与 /
- * 活跃期）一并摊平进折叠卡）。
+ * 历史条数与缓存参数使用独立弹窗，关键词在活跃设置中编辑。
  *
  * 布局：左侧一条**竖向**档位滑条（1 档在下、4 档在上，轨道下蓝上黄渐变），
  *       右侧是开关与参数。统一/分群**共用同一条滑条** —— 分群模式下它编辑
@@ -226,7 +225,7 @@ function createTierBar({ mount, dual = false, low = 100, high = 10, onChange = n
  * 峰谷：同一条滑条上两颗珠 —— 上面那颗（档位更高）= 低谷时段档位，
  *       下面那颗 = 高峰时段档位，互不交叉；两珠之间画一条半透明区间带。
  * 主编辑器与附属参数弹窗改动自动提交。
- * 「每个群聊单独设置」开关在折叠卡头部；「指令禁言」已独立成自己的折叠卡
+ * 「统一设置」开关在折叠卡正文；「指令禁言」已独立成自己的折叠卡
  * （走设置页自动保存），不再进这里的草稿。峰谷的启用开关在「峰谷设置」按钮内。
  *
  * 用法：renderChatSection 渲染 `<div id="ac-editor"></div>` 占位，
@@ -256,7 +255,7 @@ function mountActiveConfigEditor(root) {
   const dGroupPeak = stripInternal(st.groupPeakPos);
   let activeGid = '';
 
-  // 峰谷时段字段与各档条数等已收进「峰谷设置」「档位参数与持续参与」两个模态框
+  // 峰谷时段字段与各档条数等已收进「峰谷设置」「档位参数」两个模态框
   // （打开按钮见下方 ac-right），主编辑器只留滑条 / 分群。
 
   // 竖向四段刻度：滑条"1 档在下、4 档在上"，说明文字也按同向排列 ——
@@ -266,7 +265,7 @@ function mountActiveConfigEditor(root) {
   // 分段轨道/分隔线/拇指全部是静态 markup（设计稿同款，见模板）——
   // 档位反馈由拇指位 + 大号读数 + 预设高亮承担，不再做分段动态高亮。
 
-  // 档位参数行模板随「档位参数与持续参与」模态框定义（openTierParamsModal）。
+  // 档位参数行模板随「档位参数」模态框定义（openTierParamsModal）。
 
   // 内联挂载：内容直接放进折叠卡的 #ac-editor 容器（不再是模态框）。
   // 下方所有 overlay.querySelector 就地作用于该容器 —— 绑定逻辑与原模态框一致。
@@ -303,8 +302,7 @@ function mountActiveConfigEditor(root) {
   let saveQueue = Promise.resolve();
   const autoSave = () => saveAll().catch(e => alert(`保存活跃设置失败：${e.message}`));
 
-  // 「峰谷时段 / 档位参数 / 统一设置」三件套在折叠卡头部（setCard 的 extra 插槽），
-  // 不在编辑器体内 —— 统一从卡头取用（测试桩环境 closest 为 null 时退回体内查找）。
+  // 三个控制项在活跃设置正文中，和滑条共享同一张设置卡。
   const headCard = overlay.closest ? overlay.closest('.setcard') : null;
   const ctrl = (sel) => headCard?.querySelector(sel) || overlay.querySelector(sel);
   // 「统一设置」开关：开 = 统一全部群（unifiedTier=true），关 = 每个群单独设置。
@@ -532,15 +530,12 @@ function mountActiveConfigEditor(root) {
     // 分群两张图整体替换（__ 开头内部键已在装填时剔除，不会写回配置）
     storePatch.groupSliderPos = { __replace__: dGroupPos };
     storePatch.groupPeakPos = { __replace__: dGroupPeak };
-    // 各档条数 / 关键词表（来自「档位参数与持续参与」模态框）
+    // 各档条数 / 关键词表（来自「档位参数」模态框）
     if (extra.tierParams) Object.assign(storePatch, extra.tierParams);
     // 指令禁言已独立成「指令禁言」折叠卡（走设置页自动保存），不在这里写盘
     const patch = {
       store: storePatch
     };
-    if (extra.chatActive) {
-      patch.chatActive = { ...(state.config?.chatActive || {}), ...extra.chatActive };
-    }
     // 捕获本次控件值后串行提交，避免快速连续拖动时旧请求覆盖新值。
     const body = JSON.stringify(patch);
     const pending = saveQueue.catch(() => {}).then(async () => {
@@ -614,7 +609,7 @@ function mountActiveConfigEditor(root) {
     });
   }
 
-  // ── 档位参数模态框（历史条数 / 关键词表 / 被召唤后持续参与）──
+  // ── 档位参数模态框（历史条数 / 缓存）──
   function openTierParamsModal() {
     const stNow = state.config?.store || {};
     const cNow = state.config || {};
@@ -633,13 +628,7 @@ function mountActiveConfigEditor(root) {
         <div class="tp-row">最多额外追加
           <input class="inp mono tp-count" type="number" id="tp-anchor-extra" min="1" max="50" value="${esc(Number(stNow.promptAnchor?.maxExtraRead ?? 5))}" />
           条已读，超出则整体重置窗口。</div>
-        <div class="field"><label>② 的关键词表（每行一个，不区分大小写）</label>
-          <textarea id="tp-keywords" rows="4" placeholder="小鲸鱼&#10;bot">${esc((stNow.keywords || []).join('\n'))}</textarea></div>
-        <h4 class="tp-h" style="margin-top:12px">被召唤后持续参与</h4>
-        <div class="checkbox-row"><input type="checkbox" id="tp-chatactive" ${cNow.chatActive?.enabled === true ? 'checked' : ''} />
-          <label for="tp-chatactive">被召唤后可持续参与话题（1/2/3 档触发时生效）</label></div>
-        <div class="field"><label>活跃期最长持续（分钟，到期自动潜水）</label>
-          <input type="number" id="tp-chatactive-ttl" min="1" max="240" value="${esc(Number(cNow.chatActive?.ttlMinutes ?? 30))}" style="max-width:160px" /></div>`,
+        `,
       foot: `<button class="btn" id="tp-cancel">完成</button>`
     });
     sub.querySelector('#tp-cancel')?.addEventListener('click', () => closeModelModal(sub));
@@ -651,12 +640,7 @@ function mountActiveConfigEditor(root) {
             promptAnchor: {
               enabled: sub.querySelector('#tp-anchor')?.checked === true,
               maxExtraRead: clampInt(sub.querySelector('#tp-anchor-extra')?.value, 1, 50, 5)
-            },
-            keywords: String(sub.querySelector('#tp-keywords')?.value || '').split('\n').map((x) => x.trim()).filter(Boolean)
-          },
-          chatActive: {
-            enabled: sub.querySelector('#tp-chatactive')?.checked === true,
-            ttlMinutes: Math.min(240, Math.max(1, Number(sub.querySelector('#tp-chatactive-ttl')?.value) || 30))
+            }
           }
         });
       } catch (e) {
@@ -667,7 +651,7 @@ function mountActiveConfigEditor(root) {
 
   // 「峰谷时段」组合按钮：点按钮本体 = 设置高峰时段（弹窗）；
   // 点文本右侧的开关 = 启用 / 停用峰谷（不弹窗，即时预览主滑条双珠形态）。
-  // stopPropagation：三件套在折叠卡头部，不拦住会顺手把卡折叠了。
+  // 点击开关只切换峰谷启用状态，点击按钮文字打开时段编辑。
   const peakBtn = ctrl('#ac-peak-btn');
   peakBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -701,162 +685,64 @@ async function fetchMarketAccounts() {
 }
 
 /**
- * 「添加技能 / 添加插件」入口模态框：上下两个大按钮。
- * 上面 = 去市场（口令安装），悬停文案「捞点好货」；
- * 下面 = 自己造（原创建引导），悬停文案「我去牛逼」。
- */
-function openAddModuleModal(kind) {
-  const isSkill = kind === 'skill';
-  const name = isSkill ? '技能' : '插件';
-  // 双市场：技能页开 skill-market，插件页开 plugin-market（线上两个独立页面）
-  const marketUrl = `https://www.kondius.cn/qq-agent/${isSkill ? 'skill-market' : 'plugin-market'}/`;
-  const overlay = modelModalShell({
-    head: `添加${name}`,
-    body: `
-      <div class="hint" style="margin-bottom:12px">两种来路：从市场捞现成的，或者自己造一个。</div>
-      <div class="addmod-stack">
-        <button class="addmod-big" id="addmod-market">
-          <span class="addmod-label">看看${name}市场</span>
-          <span class="addmod-hover-label">捞点好货</span>
-        </button>
-        <button class="addmod-big addmod-diy" id="addmod-diy">
-          <span class="addmod-label">自己造个${name}</span>
-          <span class="addmod-hover-label">我去牛逼</span>
-        </button>
-      </div>`,
-    foot: `<button class="btn" id="addmod-cancel">算了</button>`
-  });
-  overlay.querySelector('#addmod-market')?.addEventListener('click', () => {
-    closeModelModal(overlay);
-    window.open(marketUrl, '_blank', 'noopener');
-    openInstallCodeModal();
-  });
-  overlay.querySelector('#addmod-diy')?.addEventListener('click', () => {
-    closeModelModal(overlay);
-    openCreateModuleGuide(kind);
-  });
-  overlay.querySelector('#addmod-cancel')?.addEventListener('click', () => closeModelModal(overlay));
-  return overlay;
-}
-
-/**
  * 口令安装模态框：逐行输入口令，失焦校验；
  * 「就这些吧」批量下载解压到对应目录（类型由服务器决定）。
  */
 function openInstallCodeModal() {
-  let codeRows = [];   // [{ code, status: 'idle'|'checking'|'ok'|'bad', entry }]
-  const overlay = modelModalShell({
-    head: '口令安装',
-    body: `
-      <div class="hint" style="margin-bottom:10px">
-        在市场页找到想要的技能/插件，点「复制口令！」，把得到的口令填进来。
-        每行一个；填完一行会自动校验。输完点「就这些吧」批量安装。
-        <span class="muted">（技能口令和插件口令都行 —— 类型由服务器决定，会装进各自的页签）</span>
-      </div>
-      <div id="ic-rows"></div>
-      <div class="hint" id="ic-status" style="margin-top:10px"></div>`,
-    foot: `
-      <button class="btn btn-primary" id="ic-confirm">就这些吧</button>
-      <button class="btn" id="ic-cancel">算了算了</button>`
-  });
-  const rowsBox = overlay.querySelector('#ic-rows');
-  const statusBox = overlay.querySelector('#ic-status');
-
-  const renderRows = () => {
-    rowsBox.innerHTML = codeRows.map((r, i) => {
-      const cls = r.status === 'ok' ? ' ok' : (r.status === 'bad' ? ' bad' : (r.status === 'checking' ? ' checking' : ''));
-      const dim = r.status === 'ok' ? ' dim' : (r.status === 'bad' ? '' : '');
-      const badge = r.status === 'ok'
-        ? `<span class="ic-check">✅</span><span class="ic-meta">${esc(r.entry?.name || '')}<span class="muted"> · ${esc(r.entry?.author || '')} · ${r.entry?.type === 'plugin' ? '插件' : '技能'}</span></span>`
-        : '';
-      return `<div class="ic-row${cls}${dim}">
-        <input type="text" class="ic-input" data-idx="${i}" value="${esc(r.code)}"
-          placeholder="${r.status === 'ok' ? '已匹配' : '输入 6 位口令'}"
-          autocomplete="off" spellcheck="false" ${r.status === 'ok' ? 'readonly' : ''} />
-        <button class="ic-del" data-idx="${i}" title="删除这行" aria-label="删除第 ${i + 1} 行">🗑</button>
-        ${badge}
-      </div>`;
+  const overlay = modelModalShell({ head: '口令安装',
+    body: `<div class="field"><label for="ic-codes">技能或插件口令，每行一个或用英文逗号隔开</label><textarea id="ic-codes" rows="5" autocomplete="off" spellcheck="false"></textarea></div><div id="ic-results"></div><div class="hint" id="ic-status" aria-live="polite"></div>`,
+    foot: `<button type="button" class="btn btn-primary" id="ic-confirm">安装</button>` });
+  const input = overlay.querySelector('#ic-codes'), status = overlay.querySelector('#ic-status');
+  let timer, version = 0, installing = false;
+  const codes = () => [...new Set(input.value.toUpperCase().split(/[\s,]+/).map(x => x.trim()).filter(Boolean))];
+  async function verify() {
+    const seq = ++version, list = codes();
+    if (!list.length) { overlay.querySelector('#ic-results').textContent = ''; return []; }
+    if (list.length > 30 || list.some(x => !/^[A-Z0-9]{1,32}$/.test(x))) {
+      status.textContent = '请输入有效口令，每次最多 30 个'; return [];
+    }
+    status.textContent = '正在校验…';
+    const data = await api('/api/market/verify', { method: 'POST', body: JSON.stringify({ codes: list }) });
+    if (seq !== version || !overlay.isConnected) return [];
+    const results = data.results || [];
+    overlay.querySelector('#ic-results').innerHTML = list.map(code => {
+      const r = results.find(x => x.code === code);
+      return `<p>${esc(code)} · ${r?.ok ? esc(r.name || code) + ' · ' + (r.type === 'plugin' ? '插件' : '技能') : '口令无效'}</p>`;
     }).join('');
-    // 绑定输入：失焦且有内容 → 触发校验 + 追加新行
-    rowsBox.querySelectorAll('.ic-input').forEach((inp) => {
-      inp.addEventListener('blur', async () => {
-        const idx = Number(inp.dataset.idx);
-        const code = inp.value.trim().toUpperCase();
-        if (!code) return;
-        if (codeRows[idx]?.code === code && codeRows[idx]?.status === 'ok') return;
-        codeRows[idx] = { code, status: 'checking', entry: null };
-        renderRows();
+    status.textContent = `已校验 ${list.length} 个口令`;
+    return results.filter(x => x.ok && list.includes(x.code));
+  }
+  input.addEventListener('input', () => {
+    if (installing) return;
+    ++version; clearTimeout(timer);
+    timer = setTimeout(() => verify().catch(e => { status.textContent = e.message; }), 400);
+  });
+  overlay.querySelector('#ic-confirm').addEventListener('click', async () => {
+    if (installing) return;
+    installing = true; clearTimeout(timer);
+    const btn = overlay.querySelector('#ic-confirm'); btn.disabled = input.disabled = true;
+    try {
+      const ready = await verify();
+      if (!ready.length) { status.textContent = '没有可安装的有效口令'; return; }
+      const notes = [];
+      for (const entry of ready) {
+        const install = replaceExisting => api('/api/market/install', { method: 'POST', body: JSON.stringify({ code: entry.code, entry, replaceExisting }) });
         try {
-          const r = await api('/api/market/verify', { method: 'POST', body: JSON.stringify({ codes: [code] }) });
-          const hit = (r.results || [])[0];
-          if (codeRows[idx]?.code !== code) return;   // 期间被删/改过，丢弃结果
-          if (hit?.ok) {
-            codeRows[idx] = { code, status: 'ok', entry: hit };
-            // 失焦且有内容 → 下一行出现（只在没有空行时追加）
-            if (!codeRows.some((x) => !x.code)) codeRows.push({ code: '', status: 'idle', entry: null });
-          } else {
-            codeRows[idx] = { code, status: 'bad', entry: null };
+          status.textContent = `正在安装 ${entry.name || entry.code}…`;
+          let result;
+          try { result = await install(false); }
+          catch (e) {
+            if (!String(e.message).includes('已安装；请选择更新替换或取消')) throw e;
+            if (!(await uiConfirm(`更新「${entry.name || entry.code}」？旧代码会备份，设置保留。`))) { notes.push(`${entry.code} 已取消`); continue; }
+            result = await install(true);
           }
-        } catch (e) {
-          if (codeRows[idx]?.code === code) codeRows[idx] = { code, status: 'bad', entry: null };
-          statusBox.textContent = `校验失败：${e?.message || e}`;
-        }
-        renderRows();
-      });
-    });
-    rowsBox.querySelectorAll('.ic-del').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        codeRows.splice(Number(btn.dataset.idx), 1);
-        if (!codeRows.length) codeRows.push({ code: '', status: 'idle', entry: null });
-        renderRows();
-      });
-    });
-  };
-  codeRows.push({ code: '', status: 'idle', entry: null });
-  renderRows();
-
-  overlay.querySelector('#ic-cancel')?.addEventListener('click', () => closeModelModal(overlay));
-  overlay.querySelector('#ic-confirm')?.addEventListener('click', async () => {
-    const btn = overlay.querySelector('#ic-confirm');
-    const ready = codeRows.filter((r) => r.status === 'ok' && r.entry);
-    if (!ready.length) {
-      statusBox.textContent = '还没有成功对接的口令（先把口令填对，等它变绿带 ✅）。';
-      return;
-    }
-    btn.disabled = true;
-    let installed = 0;
-    const notes = [];
-    for (const r of ready) {
-      statusBox.textContent = `正在安装 ${installed + 1}/${ready.length}：${r.entry?.name || r.code}…`;
-      try {
-        const install = (replaceExisting = false) => api('/api/market/install', {
-          method: 'POST', body: JSON.stringify({ code: r.code, entry: r.entry, replaceExisting })
-        });
-        let res;
-        try { res = await install(); }
-        catch (error) {
-          if (!String(error.message).includes('已安装；请选择更新替换或取消')) throw error;
-          if (!confirm('该扩展已安装。替换前会备份旧代码，设置保留。确定更新替换吗？')) {
-            notes.push(`${r.entry?.name || r.code} 已取消更新`); continue;
-          }
-          res = await install(true);
-        }
-        installed++;
-        notes.push(`${res.kind === 'plugin' ? '插件' : '技能'} ${res.id} 已安装`);
-      } catch (e) {
-        notes.push(`${r.entry?.name || r.code} 安装失败：${e?.message || e}`);
+          notes.push(`${result.kind === 'plugin' ? '插件' : '技能'} ${result.id} 已安装`);
+        } catch (e) { notes.push(`${entry.code}：${e.message}`); }
       }
-    }
-    statusBox.textContent = installed
-      ? `安装完成：${installed} 个。${notes.join('；')}`
-      : `全部失败。${notes.join('；')}`;
-    btn.disabled = false;
-    if (installed) {
-      // 刷新两个页签（安装的类型可能在另一页）
-      await loadModulePage('skill', { rescan: true }).catch(() => {});
-      await loadModulePage('plugin', { rescan: true }).catch(() => {});
-      setTimeout(() => closeModelModal(overlay), 1200);
-    }
+      status.textContent = notes.join('；');
+      await loadModulePage('all', { rescan: true });
+    } catch (e) { status.textContent = e.message; }
+    finally { installing = false; btn.disabled = input.disabled = false; }
   });
   return overlay;
 }
@@ -1046,119 +932,7 @@ async function openMarketUploadModal(kind, moduleId) {
   return overlay;
 }
 
-/**
- * 「自己造个技能/插件」引导（2026-09-19 零门槛版）。
- *
- * 面向完全非技术人员：没有命令行、不用找文件夹、不用懂"放进目录"。
- * 全部工作交给一段**复制出去的提示词**：用户把它粘进任意 AI 桌面工具
- * （ZCode / WorkBuddy / Qoder / DeepSeek Harness…），AI 会自己——
- *   ① 找到项目里的开发文档并读懂
- *   ② 通过提问确认用户想要什么、并判定该做成技能还是插件（多数人分不清）
- *   ③ 按文档规范生成 skill.json/plugin.json + index.js
- *   ④ 直接把文件写进 skills/<id>/ 或 plugins/<id>/（热重载自动生效）
- *
- * 提示词里写死了"三步自检"（类型判定 → 文档路径 → 落盘位置），
- * 用户不需要理解其中任何一个术语。
- */
-/**
- * 从 /api/status 的 dataDir 推导项目根目录。
- * dataDir 形如 <根>/data 或 <根>/data-2（第二实例）——去掉末尾的 data 段。
- * 拿不到（status 未加载等）返回空串，提示词里走"询问用户"兜底。
- */
-function detectProjectRoot() {
-  const dir = String(state.status?.dataDir || '');
-  if (!dir) return '';
-  const norm = dir.replace(/[\\/]+$/, '');
-  const m = /[\\/]data(-\d+)?$/i.exec(norm);
-  return m ? norm.slice(0, m.index) : norm;
-}
 
-function buildModuleCreationPrompt(kind) {
-  const isSkill = kind === 'skill';
-  // 引导 AI 从"用户点的是技能页还是插件页"出发，但**允许 AI 推翻**——
-  // 用户多数分不清两型，点错入口是常态；判定权交给读完了文档的 AI。
-  const entryHint = isSkill
-    ? '用户是从「技能」页点进来的（他大概率想要一个技能，但也可能点错了，需要你判定）'
-    : '用户是从「插件」页点进来的（他大概率想要一个插件，但也可能点错了，需要你判定）';
-  // 项目根：拿到了就直接给 AI 绝对路径（省掉 AI 全盘摸索）；拿不到就让 AI 问。
-  const root = detectProjectRoot();
-  const locateBlock = root
-    ? `这个项目就安装在我电脑的这个文件夹里（直接用，不用再找）：
-${root}
-文档在它下面的 doc/extend_development/ 里，技能/插件目录分别是它下面的 skills/ 和 plugins/。`
-    : `先问我一句"QQ Agent 装在哪个文件夹"（我不知道的话，就找桌面或开始菜单里的「QQ Agent」快捷方式 → 右键 → 打开文件所在位置）。拿到项目文件夹后再继续。`;
-  return `我电脑上有一个叫「QQ Agent」的 QQ 机器人项目，我想给它加一个新功能，但我不会写代码。请你帮我从头到尾做完，包括把文件放到位。下面是给你的完整工作说明：
-
-【第零步：定位项目】
-${locateBlock}
-
-【第一步：先读懂文档】
-读取项目里 doc/extend_development/ 目录下的这些文档：
-- skill-development.md（技能开发规范）
-- plugin-development.md（插件开发规范）
-- skill-reference.md（API 完整参考，必读）
-- 如果要操作 QQ 本身（查群成员、禁言、发文件等），还要读 snowluma-capabilities.md
-先读完再动手。文档里写全了格式要求、API 用法和常见的坑，不按文档做的产物会静默失效（不报错、就是没反应）。
-
-【第二步：搞清楚我要什么】
-${entryHint}。
-"技能"和"插件"是两种不同的东西（文档第 0 节有判定方法），大多数人分不清，所以：
-- 先问清楚我想要这个功能做什么、什么时候触发、要不要机器人"动脑子"判断；
-- 然后按文档的判定方法决定做成技能（skills/ 目录）还是插件（plugins/ 目录），并告诉我你的判定和理由；
-- 我说不上来的时候，用文档里的"三问判断法"引导我。
-
-【第三步：生成并落盘】
-确定类型后：
-1. 按对应文档的规范，生成完整可运行的文件（技能是 skills/<id>/skill.json + index.js，插件是 plugins/<id>/plugin.json + index.js）；
-2. <id> 用一个简短的小写英文标识（如 my-weather），不要用中文；
-3. 把文件直接写到项目对应的目录里去（技能 → skills/<id>/，插件 → plugins/<id>/）。这个项目开着热重载，文件落盘后会自动加载，不需要我重启或刷新；
-4. 写完后告诉我：生成了什么、放在哪、回到 QQ Agent 的「技能」或「插件」页签应该看到什么。
-
-【如果出了问题】
-生成后如果 QQ Agent 控制台的技能/插件页显示加载失败，把页面上显示的错误原因原样发给我，我来贴给你修（文档里有常见失败对照表）。
-
-现在开始：先简短地问我"你想让机器人学会什么"，然后按上面的流程走完全程。不要让我做任何技术操作。`;
-}
-
-function openCreateModuleGuide(kind) {
-  const isSkill = kind === 'skill';
-  const name = isSkill ? '技能' : '插件';
-  const prompt = buildModuleCreationPrompt(kind);
-  const overlay = modelModalShell({
-    head: `自己造个${name}`,
-    body: `
-      <div class="hint" style="margin-bottom:12px">
-        不会写代码？没问题。把下面这段提示词复制出来，粘贴到<b>任何</b>一个 AI 桌面工具里
-        （ZCode、WorkBuddy、Qoder、DeepSeek Harness 之类的都行），
-        然后告诉它你想要什么功能——它会问清楚需求、读文档、把做好的${name}直接放进项目里，
-        你回到这个页面点「刷新」就能看到。<b>全程不需要你碰任何文件夹。</b>
-      </div>
-      <pre class="guide-code" id="cmg-prompt" style="max-height:220px;overflow:auto;user-select:all;white-space:pre-wrap;word-break:break-all">${esc(prompt)}</pre>
-      <div class="hint" id="cmg-copied" style="min-height:18px;color:var(--green)"></div>`,
-    foot: `<button class="btn btn-primary" id="cmg-copy">📋 一键复制提示词</button>
-           <button class="btn" id="cmg-close">关闭</button>`
-  });
-  overlay.querySelector('#cmg-copy')?.addEventListener('click', async () => {
-    // clipboard API 在 Electron 里稳；失败回落到选中文本让用户 Ctrl+C
-    let ok = false;
-    try {
-      await navigator.clipboard.writeText(prompt);
-      ok = true;
-    } catch {
-      const pre = overlay.querySelector('#cmg-prompt');
-      if (pre) {
-        const range = document.createRange();
-        range.selectNodeContents(pre);
-        const sel = window.getSelection();
-        sel?.removeAllRanges();
-        sel?.addRange(range);
-        ok = document.execCommand?.('copy') || false;
-      }
-    }
-    const tip = overlay.querySelector('#cmg-copied');
-    if (tip) tip.textContent = ok
-      ? '✅ 已复制！现在打开你的 AI 工具（ZCode / WorkBuddy / Qoder…）直接粘贴发送。'
-      : '复制失败——请手动选中上方文本框里的全部内容按 Ctrl+C 复制。';
-  });
-  overlay.querySelector('#cmg-close')?.addEventListener('click', () => closeModelModal(overlay));
+function openModuleMarket() {
+  window.open('https://www.kondius.cn/qq-agent/skill-market/', '_blank', 'noopener');
 }

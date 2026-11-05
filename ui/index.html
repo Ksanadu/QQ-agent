@@ -35,7 +35,7 @@
       <span class="sep"></span>
       <!-- 就绪进度指示器：4 圆点 = QQ运行 / SnowLuma运行 / OneBot连接 / 配置完成 -->
       <span id="readiness-dots" class="readiness-dots" title="就绪进度：点击跳转到对应设置">
-        <span class="rdot" data-target="snowluma" title="QQ 内核未运行"></span>
+        <span class="rdot" data-target="snowluma" title="本机 QQ 未连接"></span>
         <span class="rdot" data-target="snowluma" title="SnowLuma 未运行"></span>
         <span class="rdot" data-target="snowluma" title="OneBot 未连接"></span>
         <span class="rdot" data-target="settings" title="配置未完成"></span>
@@ -58,11 +58,9 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="sessions">会话</button>
-    <button class="tab" data-tab="chats">存档</button>
     <button class="tab" data-tab="memory">记忆</button>
     <button class="tab" data-tab="usage">用量</button>
-    <button class="tab" data-tab="skills">技能</button>
-    <button class="tab" data-tab="plugins">插件</button>
+    <button class="tab" data-tab="skills">技能与插件</button>
     <button class="tab" data-tab="snowluma">SnowLuma</button>
     <button class="tab" data-tab="settings">设置</button>
     <!-- 社区功能（右侧）：金句上传 / 意见收集。金句勾选模式下「确认金句」出现在最左 -->
@@ -83,17 +81,7 @@
       </div>
     </section>
 
-    <!-- 存档视图 -->
-    <section id="view-chats" class="view">
-      <aside id="chat-list" class="list-pane">
-        <div class="list-head muted">消息存档</div>
-        <div id="chat-items"></div>
-        <div class="list-resizer" id="chat-list-resizer" title="拖动调整侧栏宽度"></div>
-      </aside>
-      <div id="chat-detail" class="detail-pane">
-        <div class="empty-hint">← 选择会话查看消息存档</div>
-      </div>
-    </section>
+    <div id="archive-parking" hidden><div id="chat-items"></div><div id="chat-detail" class="detail-pane"></div></div>
 
     <!-- SnowLuma 视图 -->
     <section id="view-snowluma" class="view">
@@ -120,13 +108,6 @@
     <!-- 技能视图：从设置页独立出来（原先和模型/聊天设置挤在一起，找不到） -->
     <section id="view-skills" class="view">
       <div id="skills-page" class="usage-pane"></div>
-    </section>
-
-    <!-- 插件视图：与技能并列的独立页签。
-         两型的区别在"谁决定何时执行"（确定性 vs 模型决定），是使用者最关心的一件事，
-         所以分成两页各自成组 —— 混在一页里既看不出类型，也数不清各有多少。 -->
-    <section id="view-plugins" class="view">
-      <div id="plugins-page" class="usage-pane"></div>
     </section>
 
     <!-- 设置视图 -->

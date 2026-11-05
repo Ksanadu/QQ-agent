@@ -1340,6 +1340,7 @@ async function saveConfig({ quiet = false } = {}) {
   }
 
   if (sec === 'chat') {
+    patch.store = { keywords: [...new Set(val('#ac-keywords', (c.store?.keywords || []).join(',')).split(',').map(x => x.trim()).filter(Boolean))] };
     // 信息发送配置已内联到「运行节奏」折叠卡（sc-* 字段）
     const effort = val('#sc-thinking-effort', c.api?.thinkingEffort || '');
     const effortValid = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effort);

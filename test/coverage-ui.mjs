@@ -193,34 +193,20 @@ await c.check('每个页签都有对应的 view-<name> 容器', () => {
     `这些页签没有对应的视图容器（点上去会没有任何反应）：${missing.join(', ')}`);
 });
 
-await c.check('「插件」页签存在，且紧挨着「技能」右边', () => {
-  const tabs = [...html.matchAll(/data-tab="([\w-]+)"/g)].map((m) => m[1]);
-  const i = tabs.indexOf('skills');
-  assert.ok(i >= 0, '找不到「技能」页签');
-  assert.ok(tabs.includes('plugins'), '找不到「插件」页签');
-  assert.equal(tabs[i + 1], 'plugins',
-    `「插件」应当紧跟在「技能」右边，实际顺序：${tabs.join(' → ')}`);
-  // 两个视图容器也都得在
-  for (const id of ['view-skills', 'view-plugins']) {
-    assert.ok(html.includes(`id="${id}"`), `缺少视图容器 ${id}`);
-  }
+await c.check('技能与插件共用一个页签与视图', () => {
+  assert.ok(html.includes('data-tab="skills">技能与插件'));
+  assert.ok(!html.includes('data-tab="plugins"'));
+  assert.ok(html.includes('id="view-skills"'));
+  assert.ok(!html.includes('data-tab="chats"'));
 });
 
-await c.check('切换页签会加载对应页（switchTab 里两个分支都在）', () => {
-  // 只加按钮不加分支 = 点进去是空白页（容器存在但没有渲染逻辑）
-  assert.ok(/name === 'skills'\)\s*loadModulePage\('skill'\)/.test(appJs),
-    "switchTab 里没有 skills 分支");
-  assert.ok(/name === 'plugins'\)\s*loadModulePage\('plugin'\)/.test(appJs),
-    "switchTab 里没有 plugins 分支");
+await c.check('切换合并页会加载技能与插件', () => {
+  assert.ok(/name === 'skills'\)\s*loadModulePage\('all'\)/.test(appJs));
 });
 
-await c.check('技能页与插件页按 kind 隔离（不会把插件渲染进技能页）', () => {
-  // 两页共用 renderModulePage，靠 kind 过滤。过滤条件一旦写错，
-  // 两页会显示一样的内容 —— 静态上先盯住"过滤用的是 kind、不是 source"。
-  const m = /function renderModulePage\(kind\)[\s\S]*?\n  const items = (.+?);/.exec(appJs);
-  assert.ok(m, '找不到 renderModulePage 里的条目过滤');
-  assert.ok(/s\.kind === meta\.kind/.test(m[1]),
-    `条目过滤没有按 kind 判型：${m[1]}`);
+await c.check('合并页保留所有扩展并标明真实类型', () => {
+  assert.ok(appJs.includes('const items = all;'));
+  assert.ok(appJs.includes("s.kind === 'plugin' ? '插件' : '技能'"));
 });
 
 await c.check('landing.html 的下载链接带版本号（官网同目录部署，相对路径即可）', () => {

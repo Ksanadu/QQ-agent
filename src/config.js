@@ -236,14 +236,6 @@ export const DEFAULT_CONFIG = {
     idleThresholdMs: 1800000,   // 群里静默多久才算"冷场"
     probability: 0.25
   },
-  // 活跃模式（chatActive）：1/2/3 档被召唤触发响应后，模型若认为话题值得持续参与，
-  // 会在 finish 时带回话题总结 → 该群进入"活跃期"：忽略档位判定必响应，
-  // 提示词注入话题锚点，模型每次自判"是否仍在话题上"，偏离则 finish("话题结束") 退出。
-  // 让"开始活跃"容易、"停下"由模型自主判断 —— 恰好是档位系统的反向补充。
-  chatActive: {
-    enabled: false,
-    ttlMinutes: 30   // 活跃期最长持续时间（分钟）：到期自动退出，兜住"模型忘了结束"
-  },
   // 表情包
   sticker: {
     enabled: true,
@@ -511,6 +503,7 @@ export function migrateLegacySkills(parsed) {
  * 与 stripDerivedFlags 一样在 loadConfig / updateConfig 时调用，删旧键不碰活键。
  */
 const OBSOLETE_PATHS = [
+  ['chatActive'],
   ['api', 'stream'],
   ['api', 'priceRemoteUrl'],
   ['budget'],
