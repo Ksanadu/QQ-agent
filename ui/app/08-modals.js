@@ -3,7 +3,7 @@
 let shutdownInProgress = false;
 async function openShutdownDialog() {
   if (shutdownInProgress) return;
-  if (!(await uiConfirm('确认停机？\n将中止当前任务，先停止 SnowLuma，再停止本机 QQ-Agent 进程树并检查端口。完成后 3 秒关闭此标签页。'))) return;
+  if (!(await uiConfirm('确认停机？'))) return;
   shutdownInProgress = true;
   const overlay = modelModalShell({ head: '停机日志',
     body: '<div class="shutdown-view"><div class="shutdown-status" role="status">正在准备停机…</div><pre class="shutdown-log" role="log" aria-live="polite"></pre></div>',

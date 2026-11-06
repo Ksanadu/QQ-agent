@@ -6,7 +6,7 @@ const dom = new JSDOM('<button id="shutdown-btn">停机</button>',{runScripts:'o
 const w=dom.window, calls=[], waits=[];
 let confirmed=false, failure=false, closed=0;
 Object.assign(w,{
-  uiConfirm:async()=>confirmed,
+  uiConfirm:async message=>{assert.equal(message,'确认停机？');return confirmed;},
   api:async(url,args)=>{calls.push({url,args});return {url:'http://127.0.0.1:9999',token:'test'};},
   fetch:async(url,args)=>{calls.push({url,args});return {ok:true,json:async()=>({status:failure?'failed':'done',logs:[{at:Date.now(),text:'[1/2] SnowLuma 已退出'},{at:Date.now(),text:'[2/2] QQ-Agent 已退出，端口已释放'}],logFile:'test.log'})};},
   setTimeout:(fn,ms)=>{waits.push(ms);queueMicrotask(fn);return 1;},
