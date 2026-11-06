@@ -15,13 +15,24 @@ export function captureAvatarContext({ segments, botId, reply }) {
   return { botId: bot, mentionIds, replySenderId };
 }
 
-export function avatarTargetForMessage(entries, requestMessageId, target, mentionedUserId) {
+// Only structured authors of messages actually shown to the model are eligible.
+export function avatarMemberIds(messages) {
+  return [...new Set((messages || []).filter(m => !m.self && !m.recalled)
+    .map(m => qqId(m.senderId)).filter(Boolean))];
+}
+
+export function avatarTargetForMessage(entries, requestMessageId, target, mentionedUserId, { contextUserId, memberIds = [] } = {}) {
   if (!['number', 'string'].includes(typeof requestMessageId) || !/^-?\d+$/.test(String(requestMessageId)) || !Number.isSafeInteger(Number(requestMessageId))) return null;
   const matches = (entries || []).filter(e => !e.self && !e.recalled && String(e.mid) === String(requestMessageId));
   if (matches.length !== 1) return null;
   const entry = matches[0];
   const context = entry.avatarContext || {};
   if (target !== 'mention' && mentionedUserId != null) return null;
+  if (target !== 'context' && contextUserId != null) return null;
+  if (target === 'context') {
+    const id = qqId(contextUserId);
+    return id && memberIds.includes(id) ? id : null;
+  }
   if (target === 'sender') return qqId(entry.senderId) || null;
   if (target === 'bot') return qqId(context.botId) || null;
   if (target === 'reply') return qqId(context.replySenderId) || null;

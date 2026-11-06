@@ -17,7 +17,7 @@ import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } f
 import { webSearch, webFetch } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
 import { findMessageWithReply } from './message-replies.js';
-import { avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
+import { avatarMemberIds, avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
 import { readForwardMessage } from './forward-messages.js';
 import { REACTION_EMOJIS } from './message-reactions.js';
 import { registerTool, listTools } from './tool-registry.js';
@@ -526,6 +526,7 @@ function registerAllTools() {
       const limit = Math.min(100, Math.max(1, Number(args.limit) || 30));
       const offset = Math.max(0, Number(args.offset) || 0);
       const messages = ctx.store.recent(ctx.chatKey, { limit, offset: offset + (ctx.session.pastStateCount || 0) });
+      ctx.session.avatarMemberIds = [...new Set([...(ctx.session.avatarMemberIds || []), ...avatarMemberIds(messages)])];
       return ok({
         count: messages.length,
         messages: messages.map((m) => ({
@@ -576,7 +577,7 @@ function registerAllTools() {
   registerTool({
     id: 'get_active_members',
     name: '查看活跃成员',
-    description: '查看当前会话最近活跃的成员（QQ 号、名字、最近发言时间、发言数），用于 @ 或拍一拍时找人。',
+    description: '查看当前会话最近活跃的成员（QQ 号、名字、最近发言时间、发言数），用于查看头像、@ 或拍一拍时找人。',
     category: 'query',
     icon: '👥',
     parameters: {
@@ -585,6 +586,7 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       const members = ctx.store.activeMembers(ctx.chatKey, Math.min(20, Math.max(1, Number(args.limit) || 10)));
+      ctx.session.avatarMemberIds = [...new Set([...(ctx.session.avatarMemberIds || []), ...avatarMemberIds(members.map(m => ({ senderId: m.userId })))])];
       return ok({
         members: members.map((m) => ({
           userId: m.userId,
@@ -652,7 +654,7 @@ function registerAllTools() {
   registerTool({
     id: 'get_user_avatar',
     name: '查看 QQ 用户头像',
-    description: '根据本轮用户的语义判断，仅在用户明确要求查看、识别或评价指定用户的 QQ 头像时调用；闲聊提到头像不调用。先读 core-media。传请求消息的 #ID，并选择目标来源：sender=该条消息作者，mention=该条消息真实 @ 的人，reply=该条消息准确引用的作者，bot=机器人。目标不明确先询问，不得猜人或用聊天图片替代。',
+    description: '用户要求查看、识别或评价指定用户的 QQ 头像时调用。先读 core-media。传请求消息 #ID；target：sender=请求者，mention=真实 @，reply=引用作者，bot=机器人，context=本轮上下文已知群友（填 contextUserId）。用户直接说昵称时，从聊天记录的昵称和 QQ 号确定目标即可，不必要求 @ 或引用；缺少身份信息先查 get_active_members，同名或指代不清才询问。',
     category: 'query',
     icon: '👤',
     requiresVision: true,
@@ -660,14 +662,17 @@ function registerAllTools() {
       type: 'object',
       properties: {
         requestMessageId: { type: ['integer', 'string'], description: '本轮提出查看头像请求的消息 ID，不是引用源 ID，可为负数' },
-        target: { type: 'string', enum: ['sender', 'mention', 'reply', 'bot'], description: '根据用户语义选择头像目标来源' },
+        target: { type: 'string', enum: ['sender', 'mention', 'reply', 'bot', 'context'], description: '根据用户语义选择头像目标来源；昵称指向上下文中的群友时选 context' },
+        contextUserId: { type: 'string', description: '仅 target=context 时必填：本轮聊天上下文或 get_active_members/get_recent_messages 查询结果中已确认的目标 QQ 号，不得猜测' },
         mentionedUserId: { type: 'string', description: '仅 target=mention 时使用；真实 @ 多人时填用户明确指定的 QQ 号，只有一人时可省略。不接受手打 @、昵称或任意 QQ 号' }
       },
       required: ['requestMessageId', 'target']
     },
     async execute(ctx, args) {
-      const userId = avatarTargetForMessage(ctx.triggerEntries, args.requestMessageId, args.target, args.mentionedUserId);
-      if (!userId) return err('无法从本轮请求消息及所选来源确定头像目标。请检查请求消息 ID 和 target；多人 @ 时指定其中的 QQ 号，目标不明确则询问用户。');
+      const userId = avatarTargetForMessage(ctx.triggerEntries, args.requestMessageId, args.target, args.mentionedUserId, {
+        contextUserId: args.contextUserId, memberIds: ctx.session.avatarMemberIds || []
+      });
+      if (!userId) return err('无法从本轮请求及所选来源确定头像目标。检查请求消息 ID 和 target；context 需填本轮上下文已确认的 contextUserId，缺少身份信息先查 get_active_members。同名或指代不清再询问用户。');
       const { buffer, mime } = await fetchUserAvatar(userId);
       return { content: imageParts(`QQ ${userId} 的头像：`, [`data:${mime};base64,${buffer.toString('base64')}`]) };
     }

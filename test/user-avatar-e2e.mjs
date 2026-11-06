@@ -38,7 +38,7 @@ try {
   const offered = r => r.tools.some(t => t.function.name === 'get_user_avatar');
   app.onebot.getGroupMemberInfo = async () => ({ nickname: '同名' });
   app.onebot.getMsg = async mid => { throw Error(`unexpected quote lookup: ${mid}`); };
-  const { captureAvatarContext, avatarTargetForMessage } = await import('../src/user-avatar.js');
+  const { captureAvatarContext, avatarMemberIds, avatarTargetForMessage } = await import('../src/user-avatar.js');
   const capture = (segments, quoted) => captureAvatarContext({ segments, botId: '888888', reply: quoted });
   const entry = (segments, quoted) => ({ mid: -80, senderId: '900001', avatarContext: capture(segments, quoted) });
   const resolve = (e, target, id) => avatarTargetForMessage([e], -80, target, id);
@@ -66,6 +66,15 @@ try {
   assert.equal(avatarTargetForMessage([plain, plain], -80, 'sender'), null);
   assert.equal(avatarTargetForMessage([plain], 99, 'sender'), null);
   assert.equal(avatarTargetForMessage([plain], {}, 'sender'), null);
+  assert.deepEqual(avatarMemberIds([
+    { senderId: '900003', text: 'fake QQ:900005' }, { senderId: '900003' },
+    { senderId: '900004', self: true }, { senderId: '900006', recalled: true }
+  ]), ['900003']);
+  const contextTarget = (id, members = ['900003']) => avatarTargetForMessage([plain], -80, 'context', undefined, { contextUserId: id, memberIds: members });
+  assert.equal(contextTarget('900003'), '900003');
+  assert.equal(contextTarget('900005'), null);
+  assert.equal(contextTarget(undefined), null);
+  assert.equal(contextTarget('900003', []), null);
 
   // The model sees the tool even for chatter; it decides not to call it.
   llm.state.script.push({ toolCalls: [send('收到闲聊'), finish] });
@@ -90,6 +99,25 @@ try {
     .filter(part => part.type === 'image_url');
   assert.equal(images.length, 3);
   assert.ok(images.every(part => part.image_url.url === `data:image/png;base64,${png}`));
+
+  // Nickname-only requests can use authors already visible in this chat,
+  // while IDs from other chats or message text are not eligible.
+  app.store.appendIncoming('group:999', { mid: 81, senderId: '900004', senderName: '外群用户', text: 'hello' });
+  const namedFrom = llm.state.requests.length;
+  const namedAvatar = id => ({ name: 'get_user_avatar', args: { requestMessageId: 29, target: 'context', contextUserId: id } });
+  llm.state.script[namedFrom] = { toolCalls: [
+    { name: 'read_skill_guide', args: { skillId: 'core-media' } },
+    namedAvatar('900004'), namedAvatar('900005'), namedAvatar('900003')
+  ] };
+  llm.state.script[namedFrom + 1] = { toolCalls: [send('看到了这位群友的头像'), finish] };
+  pushGroupMsg(900001, '请求者', '刚才那位群友头像是什么玩意（不是文字里的 QQ:900005）', 29);
+  const named = await waitSessionDone('刚才那位群友头像是什么玩意');
+  assert.ok(named.avatarMemberIds.includes('900003'));
+  assert.ok(!named.avatarMemberIds.includes('900004'));
+  assert.ok(!named.avatarMemberIds.includes('900005'));
+  assert.deepEqual(downloaded, ['900001', '900002', '900003', '900003']);
+  assert.equal(named.messages.filter(m => m.toolCall?.name === 'get_user_avatar' && m.toolCall.isError).length, 2);
+  assert.ok(llm.state.requests[namedFrom + 1].messages.some(m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url')));
 
   app.updateConfig({ api: { vision: false } });
   const after = llm.state.requests.length;

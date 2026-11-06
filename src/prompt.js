@@ -16,6 +16,7 @@ import { sliderToTier as _sliderToTier, tierToSlider as _tierToSlider, TIER_SLID
 export { _sliderToTier as sliderToTier, _tierToSlider as tierToSlider, _TIER_SLIDER_BANDS as TIER_SLIDER_BANDS };
 import { formatFullTime, formatShortTime } from './util.js';
 import { coreGuideIndexes } from './core-guides.js';
+import { avatarMemberIds } from './user-avatar.js';
 import { skillManager } from './skills/manager.js';
 
 // ── 系统提示 ─────────────────────────────────────────────────────────────
@@ -604,6 +605,9 @@ export function buildUserPrompt(ctx) {
   const anchored = anchorDecision && anchorDecision.mode === 'anchored';
   const readAnchorMessages = anchored ? anchorDecision.anchorMessages : [];
   const readExtraMessages = anchored ? anchorDecision.extraMessages : (past.messages || []);
+  if (ctx.session) {
+    ctx.session.avatarMemberIds = avatarMemberIds([...readAnchorMessages, ...readExtraMessages, ...ctx.triggerEntries]);
+  }
   // 模型实际看过的已读条数（offset 补偿口径）：锚定轮 = 锚点+追加，标准轮 = 滑窗
   const readShownCount = anchored
     ? readAnchorMessages.length + readExtraMessages.length
