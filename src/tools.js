@@ -17,6 +17,7 @@ import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } f
 import { webSearch, webFetch } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
 import { findMessageWithReply } from './message-replies.js';
+import { avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
 import { readForwardMessage } from './forward-messages.js';
 import { REACTION_EMOJIS } from './message-reactions.js';
 import { registerTool, listTools } from './tool-registry.js';
@@ -645,6 +646,26 @@ function registerAllTools() {
         reply: entry.reply,
         truncated: Boolean(entry.truncated)
       });
+    }
+  });
+
+  registerTool({
+    id: 'get_user_avatar',
+    name: '查看 QQ 用户头像',
+    description: '仅在【未读信息】有明确请求查看或评价某位 QQ 用户的头像时使用。先读 core-media。传发出查看请求的那条消息的 #ID（不是引用源 ID，也不是 QQ 号）。程序会从该消息的发言者、真实 @ 或已解析的引用中绑定目标，不得猜人或用聊天图片替代。',
+    category: 'query',
+    icon: '👤',
+    requiresVision: true,
+    parameters: {
+      type: 'object',
+      properties: { requestMessageId: { type: ['integer', 'string'], description: '本轮明确提出查看头像的那条请求消息的 QQ 消息 ID，可为负数' } },
+      required: ['requestMessageId']
+    },
+    async execute(ctx, args) {
+      const userId = avatarTargetForMessage(ctx.triggerEntries, args.requestMessageId);
+      if (!userId) return err('这条消息不是本轮可识别的明确头像请求，或没有唯一目标。请让用户说明是自己的头像、@目标，或准确引用目标的消息。');
+      const { buffer, mime } = await fetchUserAvatar(userId);
+      return { content: imageParts(`QQ ${userId} 的头像：`, [`data:${mime};base64,${buffer.toString('base64')}`]) };
     }
   });
 

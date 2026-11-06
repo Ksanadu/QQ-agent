@@ -4,7 +4,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const definitions=[
   ['core-stickers','发表情、贴表情、拍一拍或整理表情库时'],
   ['core-context','查询历史、引用对象、连续任务、记忆或跨会话发送时'],
-  ['core-media','查看、收藏、发送图片，读语音/视频/合并转发或发视频卡片时'],
+  ['core-media','查看头像或图片，收藏、发送图片，读语音/视频/合并转发或发视频卡片时'],
   ['core-web','查实时信息、新梗、不确定事实或网页内容时']
 ];
 const guides=new Map(definitions.map(([id,when])=>[id,Object.freeze({

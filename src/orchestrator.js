@@ -919,6 +919,7 @@ export class Orchestrator {
     // 现在统一交给 getToolAvailability()，并把不可用原因写进会话（UI 可解释）。
     const availability = new Map();
     const toolDefs = this.toolDefs.filter((d) => {
+      if (d.id === 'get_user_avatar' && !triggerEntries.some(e => e.avatarTargetId && e.mid != null && !e.self && !e.recalled)) return false;
       const st = getToolAvailability(d.id, {
         skills: skillManager,
         toolsCfg,

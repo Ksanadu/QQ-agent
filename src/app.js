@@ -1,5 +1,6 @@
 import { launchLocalQQ, localQQConnected } from './local-qq.js';
 import { readSnowlumaLogs } from './snowluma-logs.js';
+import { bindAvatarRequest } from './user-avatar.js';
 // 总装：OneBot 事件接入 → 存储 → 编排器；HTTP API + SSE 给 UI。
 // Electron 主进程与 headless 服务器都从这里启动。
 import http from 'node:http';
@@ -728,6 +729,7 @@ export function createApp({ log = console.log } = {}) {
       media,
       atMe,
       atNames,
+      avatarTargetId: bindAvatarRequest({ segments, senderId, botId: selfIdNow, reply }),
       pureBotMention: kind === 'group' && isPureBotMention(segments, selfIdNow)
     });
     emit('chat-update', `${kind}:${id}`);
