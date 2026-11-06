@@ -32,50 +32,60 @@ try {
   const text = value => ({ type: 'text', data: { text: value } });
   const at = qq => ({ type: 'at', data: { qq } });
   const reply = id => ({ type: 'reply', data: { id } });
-  const avatar = requestMessageId => ({ name: 'get_user_avatar', args: { requestMessageId } });
+  const avatar = (requestMessageId, target, mentionedUserId) => ({ name: 'get_user_avatar', args: { requestMessageId, target, ...(mentionedUserId == null ? {} : { mentionedUserId }) } });
   const send = message => ({ name: 'send_message', args: { messages: [message] } });
   const finish = { name: 'finish', args: { summary: 'fixture' } };
   const offered = r => r.tools.some(t => t.function.name === 'get_user_avatar');
   app.onebot.getGroupMemberInfo = async () => ({ nickname: '同名' });
   app.onebot.getMsg = async mid => { throw Error(`unexpected quote lookup: ${mid}`); };
-  const { bindAvatarRequest } = await import('../src/user-avatar.js');
-  const bind = (segments, quoted) => bindAvatarRequest({ segments, senderId: '900001', botId: '888888', reply: quoted });
-  assert.equal(bind([at('888888'), text(' 看看我的 QQ 头像')]), '900001');
-  for (const question of ['我头像是谁？', '我的头像是谁啊？', '我的QQ头像是什么？', '我的头像是什么图？', '我的头像是什么角色？', '我的头像是哪个人物？', '我的头像长什么样？', '我的头像好看吗？']) {
-    assert.equal(bind([at('888888'), text(` ${question}`)]), '900001', question);
-  }
-  assert.equal(bind([text('你的头像是谁？')]), '888888');
-  assert.equal(bind([at('888888'), at('900002'), text(' 的头像是谁？')]), '900002');
-  assert.equal(bind([at('900002'), at('900003'), text(' 的头像是谁？')]), null);
-  assert.equal(bind([text('的头像是谁？')]), null);
-  assert.equal(bind([reply(-80), text('他的头像是谁？')], { resolved: true, messageId: -80, senderId: '900003' }), '900003');
-  for (const chatter of ['我的头像', '我头像换了', '我知道我的头像是谁', '他说我的头像是谁？', '谁的头像？', '他的头像是谁？', '看看 @同名 的头像是谁？']) {
-    assert.equal(bind([text(chatter)]), null, chatter);
-  }
-  assert.equal(bind([text('看看 '), at('900002'), text(' 和 '), at('900003'), text(' 的头像')]), null);
-  assert.equal(bind([text('看看 @同名 的头像')]), null);
-  assert.equal(bind([reply(-80), text('看看他的头像')], { resolved: true, messageId: -81, senderId: '900003' }), null);
-  assert.equal(bind([reply(-80), text('他头像换了')], { resolved: true, messageId: -80, senderId: '900003', text: '看看我的头像' }), null);
-  assert.equal(bind([{ type: 'forward', data: {} }, text('看看我的头像')]), null);
+  const { captureAvatarContext, avatarTargetForMessage } = await import('../src/user-avatar.js');
+  const capture = (segments, quoted) => captureAvatarContext({ segments, botId: '888888', reply: quoted });
+  const entry = (segments, quoted) => ({ mid: -80, senderId: '900001', avatarContext: capture(segments, quoted) });
+  const resolve = (e, target, id) => avatarTargetForMessage([e], -80, target, id);
+  const plain = entry([text('Any wording, no keyword or fixed sentence required.')]);
+  assert.equal(resolve(plain, 'sender'), '900001');
+  assert.equal(resolve(plain, 'bot'), '888888');
+  assert.equal(resolve(plain, 'mention'), null);
+  assert.equal(resolve(plain, 'reply'), null);
+  assert.equal(resolve(plain, 'unknown'), null);
+  assert.equal(resolve(plain, 'sender', '900002'), null);
+  const mentions = entry([at('888888'), at('900002'), at('900003'), at('900002')]);
+  assert.deepEqual(mentions.avatarContext.mentionIds, ['900002', '900003']);
+  assert.equal(resolve(mentions, 'mention'), null);
+  assert.equal(resolve(mentions, 'mention', '900003'), '900003');
+  assert.equal(resolve(mentions, 'mention', '900004'), null);
+  assert.equal(resolve(entry([at('900002')]), 'mention'), '900002');
+  assert.equal(resolve(entry([text('@900002'), { type: 'forward', data: { content: [at('900002')] } }]), 'mention'), null);
+  assert.equal(resolve(entry([reply(10)], { resolved: true, messageId: 10, senderId: '900003' }), 'reply'), '900003');
+  assert.equal(resolve(entry([reply(10)], { resolved: true, messageId: 11, senderId: '900003' }), 'reply'), null);
+  assert.equal(resolve(entry([reply(10)], { resolved: false, messageId: 10, senderId: '900003' }), 'reply'), null);
+  assert.equal(resolve(entry([reply(10), reply(11)], { resolved: true, messageId: 10, senderId: '900003' }), 'reply'), null);
+  assert.equal(resolve(entry([], { resolved: true, messageId: 10, senderId: '900003' }), 'reply'), null);
+  assert.equal(resolve({ ...plain, recalled: true }, 'sender'), null);
+  assert.equal(resolve({ ...plain, self: true }, 'sender'), null);
+  assert.equal(avatarTargetForMessage([plain, plain], -80, 'sender'), null);
+  assert.equal(avatarTargetForMessage([plain], 99, 'sender'), null);
+  assert.equal(avatarTargetForMessage([plain], {}, 'sender'), null);
 
-  llm.state.script.push({ toolCalls: [avatar(10), send('收到闲聊'), finish] });
+  // The model sees the tool even for chatter; it decides not to call it.
+  llm.state.script.push({ toolCalls: [send('收到闲聊'), finish] });
   pushGroupMsg(900003, '同名', '今天换了个头像', 10);
   await waitSessionDone('今天换了个头像');
-  assert.equal(offered(llm.state.requests[0]), false);
+  assert.equal(offered(llm.state.requests[0]), true);
   assert.deepEqual(downloaded, []);
   const from = llm.state.requests.length;
   llm.state.script[from] = { toolCalls: [
     { name: 'read_skill_guide', args: { skillId: 'core-media' } },
-    avatar(10), avatar(-21), avatar(22), avatar(23)
+    avatar(10, 'sender'), avatar(-21, 'mention', '900002'), avatar(-21, 'sender'), avatar(22, 'mention'), avatar(23, 'reply')
   ] };
   llm.state.script[from + 1] = { toolCalls: [send('收到头像'), finish] };
-  pushGroupMsg(900001, '请求者', '我头像是谁？', -21);
-  pushGroupMsg(900001, '请求者', '', 22, { message: [text('看看 '), at('900002'), text(' 的头像')] });
-  pushGroupMsg(900001, '请求者', '', 23, { message: [reply(10), text('看下他的头像')] });
-  const s = await waitSessionDone('我头像是谁？');
+  pushGroupMsg(900001, '请求者', '认得我头像里这位吗，帮忙看看出自哪部作品', -21);
+  pushGroupMsg(900001, '请求者', '', 22, { message: [text('你认得 '), at('900002'), text(' 头像里那位吗')] });
+  pushGroupMsg(900001, '请求者', '', 23, { message: [reply(10), text('他用的头像出自哪部作品，认得吗')] });
+  const s = await waitSessionDone('认得我头像里这位吗');
   assert.equal(offered(llm.state.requests[from]), true);
   assert.deepEqual(downloaded, ['900001', '900002', '900003']);
-  assert.equal(s.messages.filter(m => m.toolCall?.name === 'get_user_avatar' && m.toolCall.isError).length, 1);
+  assert.equal(s.messages.filter(m => m.toolCall?.name === 'get_user_avatar' && m.toolCall.isError).length, 2);
   const images = llm.state.requests[from + 1].messages.flatMap(m => Array.isArray(m.content) ? m.content : [])
     .filter(part => part.type === 'image_url');
   assert.equal(images.length, 3);
@@ -88,7 +98,7 @@ try {
   await waitFor(() => llm.state.requests.length > after, 5000);
   assert.equal(offered(llm.state.requests[after]), false);
   await waitSessionDone('评价一下我的头像');
-  console.log('PASS avatar requests are scoped to the triggering message, bind sender/@/exact reply, and deliver image parts only with vision enabled');
+  console.log('PASS avatar tool is offered without wording gates; scripted LLM selects sender/@/reply, invalid targets are rejected, and image parts require vision');
 } finally {
   try { await env?.teardown(); } finally { https.request = request; dns.promises.lookup = lookup; }
 }

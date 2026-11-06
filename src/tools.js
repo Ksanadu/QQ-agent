@@ -652,18 +652,22 @@ function registerAllTools() {
   registerTool({
     id: 'get_user_avatar',
     name: '查看 QQ 用户头像',
-    description: '仅在【未读信息】有明确请求查看或评价某位 QQ 用户的头像时使用。先读 core-media。传发出查看请求的那条消息的 #ID（不是引用源 ID，也不是 QQ 号）。程序会从该消息的发言者、真实 @ 或已解析的引用中绑定目标，不得猜人或用聊天图片替代。',
+    description: '根据本轮用户的语义判断，仅在用户明确要求查看、识别或评价指定用户的 QQ 头像时调用；闲聊提到头像不调用。先读 core-media。传请求消息的 #ID，并选择目标来源：sender=该条消息作者，mention=该条消息真实 @ 的人，reply=该条消息准确引用的作者，bot=机器人。目标不明确先询问，不得猜人或用聊天图片替代。',
     category: 'query',
     icon: '👤',
     requiresVision: true,
     parameters: {
       type: 'object',
-      properties: { requestMessageId: { type: ['integer', 'string'], description: '本轮明确提出查看头像的那条请求消息的 QQ 消息 ID，可为负数' } },
-      required: ['requestMessageId']
+      properties: {
+        requestMessageId: { type: ['integer', 'string'], description: '本轮提出查看头像请求的消息 ID，不是引用源 ID，可为负数' },
+        target: { type: 'string', enum: ['sender', 'mention', 'reply', 'bot'], description: '根据用户语义选择头像目标来源' },
+        mentionedUserId: { type: 'string', description: '仅 target=mention 时使用；真实 @ 多人时填用户明确指定的 QQ 号，只有一人时可省略。不接受手打 @、昵称或任意 QQ 号' }
+      },
+      required: ['requestMessageId', 'target']
     },
     async execute(ctx, args) {
-      const userId = avatarTargetForMessage(ctx.triggerEntries, args.requestMessageId);
-      if (!userId) return err('这条消息不是本轮可识别的明确头像请求，或没有唯一目标。请让用户说明是自己的头像、@目标，或准确引用目标的消息。');
+      const userId = avatarTargetForMessage(ctx.triggerEntries, args.requestMessageId, args.target, args.mentionedUserId);
+      if (!userId) return err('无法从本轮请求消息及所选来源确定头像目标。请检查请求消息 ID 和 target；多人 @ 时指定其中的 QQ 号，目标不明确则询问用户。');
       const { buffer, mime } = await fetchUserAvatar(userId);
       return { content: imageParts(`QQ ${userId} 的头像：`, [`data:${mime};base64,${buffer.toString('base64')}`]) };
     }

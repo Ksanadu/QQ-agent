@@ -85,7 +85,7 @@ export class ChatStore {
   }
 
   /** 追加一条收到的消息（未读）。返回写入的条目。 */
-  appendIncoming(chatKey, { mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [], avatarTargetId = null, pureBotMention = false }) {
+  appendIncoming(chatKey, { mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [], avatarContext = null, pureBotMention = false }) {
     const st = this.#state(chatKey);
     const entry = {
       id: st.nextLocalId++,
@@ -107,7 +107,7 @@ export class ChatStore {
       // 渲染进 text 的 @片段原文（含 @ 前缀）：关键词判定据此剔除，
       // 防"@ 别人的名字里带关键词"误触发。空数组 = 该消息没有 @ 段。
       atNames: (Array.isArray(atNames) ? atNames : []).map((n) => String(n ?? '')).filter(Boolean).slice(0, 20),
-      ...(avatarTargetId ? { avatarTargetId } : {}),
+      ...(avatarContext ? { avatarContext } : {}),
       pureBotMention: pureBotMention === true
     };
     st.messages.push(entry);
