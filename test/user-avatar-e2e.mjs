@@ -41,6 +41,17 @@ try {
   const { bindAvatarRequest } = await import('../src/user-avatar.js');
   const bind = (segments, quoted) => bindAvatarRequest({ segments, senderId: '900001', botId: '888888', reply: quoted });
   assert.equal(bind([at('888888'), text(' 看看我的 QQ 头像')]), '900001');
+  for (const question of ['我头像是谁？', '我的头像是谁啊？', '我的QQ头像是什么？', '我的头像是什么图？', '我的头像是什么角色？', '我的头像是哪个人物？', '我的头像长什么样？', '我的头像好看吗？']) {
+    assert.equal(bind([at('888888'), text(` ${question}`)]), '900001', question);
+  }
+  assert.equal(bind([text('你的头像是谁？')]), '888888');
+  assert.equal(bind([at('888888'), at('900002'), text(' 的头像是谁？')]), '900002');
+  assert.equal(bind([at('900002'), at('900003'), text(' 的头像是谁？')]), null);
+  assert.equal(bind([text('的头像是谁？')]), null);
+  assert.equal(bind([reply(-80), text('他的头像是谁？')], { resolved: true, messageId: -80, senderId: '900003' }), '900003');
+  for (const chatter of ['我的头像', '我头像换了', '我知道我的头像是谁', '他说我的头像是谁？', '谁的头像？', '他的头像是谁？', '看看 @同名 的头像是谁？']) {
+    assert.equal(bind([text(chatter)]), null, chatter);
+  }
   assert.equal(bind([text('看看 '), at('900002'), text(' 和 '), at('900003'), text(' 的头像')]), null);
   assert.equal(bind([text('看看 @同名 的头像')]), null);
   assert.equal(bind([reply(-80), text('看看他的头像')], { resolved: true, messageId: -81, senderId: '900003' }), null);
@@ -58,10 +69,10 @@ try {
     avatar(10), avatar(-21), avatar(22), avatar(23)
   ] };
   llm.state.script[from + 1] = { toolCalls: [send('收到头像'), finish] };
-  pushGroupMsg(900001, '请求者', '看看我的头像', -21);
+  pushGroupMsg(900001, '请求者', '我头像是谁？', -21);
   pushGroupMsg(900001, '请求者', '', 22, { message: [text('看看 '), at('900002'), text(' 的头像')] });
   pushGroupMsg(900001, '请求者', '', 23, { message: [reply(10), text('看下他的头像')] });
-  const s = await waitSessionDone('看看我的头像');
+  const s = await waitSessionDone('我头像是谁？');
   assert.equal(offered(llm.state.requests[from]), true);
   assert.deepEqual(downloaded, ['900001', '900002', '900003']);
   assert.equal(s.messages.filter(m => m.toolCall?.name === 'get_user_avatar' && m.toolCall.isError).length, 1);

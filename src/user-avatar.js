@@ -5,7 +5,7 @@ const qqId = value => /^[1-9]\d{4,9}$/.test(String(value ?? '')) ? String(value)
 const leadingMention = /^\uE000(\d{5,10})\uE001\s*/;
 const politePrefix = /^(?:请(?:你)?|麻烦(?:你)?|能不能|可不可以|可以|你能|帮我|给我|你)\s*/u;
 const request = /^(?:看(?:看|一下|下|一眼)?|瞧(?:瞧|一下|一眼)?|查看|评价(?:一下|下)?|点评(?:一下|下)?|分析(?:一下|下)?|描述(?:一下|下)?|识别(?:一下|下)?)[\s：:]*/u;
-const subject = /^(.*?)\s*(?:QQ\s*)?头像\s*(?:是什么图?|长什么样|怎么样|好不好看|好看吗)?[吧呀啊嘛呗吗么]*[？?！!。．.]*$/iu;
+const subject = /^(.*?)\s*(?:QQ\s*)?头像\s*(是谁|是什么(?:图|角色|人物)?|是哪个(?:角色|人物)|长什么样|怎么样|好不好看|好看吗)?[吧呀啊嘛呗吗么]*[？?！!。．.]*$/iu;
 const selfWords = /^(?:我(?:自己)?|本人)(?:的)?$/u;
 const replyWords = /^(?:他|她|TA|这人|那人|这个人|那个人|被引用的人|引用消息的作者|这位|那位)(?:的)?$/iu;
 const directMention = /^\uE000(\d{5,10})\uE001\s*的?$/;
@@ -39,15 +39,16 @@ export function bindAvatarRequest({ segments, senderId, botId, reply }) {
   let directive = body;
   for (let i = 0; i < 8 && politePrefix.test(directive); i++) directive = directive.replace(politePrefix, '');
   const verb = request.exec(directive);
-  if (!verb && !/头像\s*(?:是什么(?:图)?|长什么样|怎么样|好不好看|好看吗)[？?。]*$/u.test(body)) return null;
   const m = subject.exec(verb ? directive.slice(verb[0].length) : body);
-  if (!m) return null;
+  // Use the same question match for recognition and parsing, so direct
+  // questions cannot be dropped by a separate, narrower allowlist.
+  if (!m || (!verb && !m[2])) return null;
   const target = m[1].trim();
   const id = selfWords.test(target) ? qqId(senderId)
     : /^你(?:的)?$/u.test(target) ? qqId(botId)
     : directMention.exec(target)?.[1];
   if (id) return id;
-  if (target && !replyWords.test(target)) return null;
+  if (target && !replyWords.test(target) && !(target === '的' && leading.size)) return null;
   if (quoteIds.length && (quoteIds.length !== 1 || !reply?.resolved || String(reply.messageId) !== quoteIds[0])) return null;
   const quoted = quoteIds.length ? qqId(reply.senderId) : '';
   if (quoted) leading.add(quoted);
