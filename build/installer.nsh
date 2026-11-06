@@ -48,6 +48,33 @@
   ${EndIf}
 !macroend
 
+; Restore user-installed extensions without replacing the new bundled code.
+; Existing bundled modules retain only their mutable data/storage directories.
+!macro RESTORE_EXTENSIONS SRC DST
+  ${If} ${FileExists} "${SRC}\*.*"
+    FindFirst $R0 $R1 "${SRC}\*.*"
+    ${DoWhile} $R1 != ""
+      ${If} $R1 != "."
+      ${AndIf} $R1 != ".."
+      ${AndIf} ${FileExists} "${SRC}\$R1\*.*"
+        ${IfNot} ${FileExists} "${DST}\$R1\*.*"
+          CreateDirectory "${DST}\$R1"
+          !insertmacro ROBOTREE "${SRC}\$R1" "${DST}\$R1"
+        ${Else}
+          ${If} ${FileExists} "${SRC}\$R1\data\*.*"
+            !insertmacro ROBOTREE "${SRC}\$R1\data" "${DST}\$R1\data"
+          ${EndIf}
+          ${If} ${FileExists} "${SRC}\$R1\storage\*.*"
+            !insertmacro ROBOTREE "${SRC}\$R1\storage" "${DST}\$R1\storage"
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
+      FindNext $R0 $R1
+    ${Loop}
+    FindClose $R0
+  ${EndIf}
+!macroend
+
 !ifndef BUILD_UNINSTALLER
 
 Var OldDataDir        ; 用户手动指定的旧版目录（压缩包版迁移用）
@@ -169,6 +196,12 @@ FunctionEnd
         DetailPrint "已备份 SnowLuma 登录状态：→ $BackupDir\snowluma-config"
       ${EndIf}
     ${EndIf}
+    ${If} ${FileExists} "$DetectedDir\resources\app\skills\*.*"
+      !insertmacro ROBOTREE "$DetectedDir\resources\app\skills" "$BackupDir\skills"
+    ${EndIf}
+    ${If} ${FileExists} "$DetectedDir\resources\app\plugins\*.*"
+      !insertmacro ROBOTREE "$DetectedDir\resources\app\plugins" "$BackupDir\plugins"
+    ${EndIf}
   ${EndIf}
 !macroend
 
@@ -186,6 +219,10 @@ FunctionEnd
     !insertmacro ROBOTREE "$BackupDir\snowluma-config" "$INSTDIR\resources\app\snowluma\config"
     DetailPrint "已还原 SnowLuma 登录状态（免重新扫码）"
   ${EndIf}
+  ${If} $BackupDir != ""
+    !insertmacro RESTORE_EXTENSIONS "$BackupDir\skills" "$INSTDIR\resources\app\skills"
+    !insertmacro RESTORE_EXTENSIONS "$BackupDir\plugins" "$INSTDIR\resources\app\plugins"
+  ${EndIf}
 
   ; ② 用户手动指定的旧版目录（压缩包用户）：显式选择优先，覆盖上面的还原
   ${If} $OldDataDir != ""
@@ -200,5 +237,11 @@ FunctionEnd
     CreateDirectory "$INSTDIR\resources\app\snowluma\config"
     !insertmacro ROBOTREE "$OldDataDir\snowluma\config" "$INSTDIR\resources\app\snowluma\config"
     DetailPrint "已迁移 SnowLuma 登录状态"
+  ${EndIf}
+  ${If} $OldDataDir != ""
+    !insertmacro RESTORE_EXTENSIONS "$OldDataDir\skills" "$INSTDIR\resources\app\skills"
+    !insertmacro RESTORE_EXTENSIONS "$OldDataDir\plugins" "$INSTDIR\resources\app\plugins"
+    !insertmacro RESTORE_EXTENSIONS "$OldDataDir\resources\app\skills" "$INSTDIR\resources\app\skills"
+    !insertmacro RESTORE_EXTENSIONS "$OldDataDir\resources\app\plugins" "$INSTDIR\resources\app\plugins"
   ${EndIf}
 !macroend

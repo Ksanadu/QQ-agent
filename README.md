@@ -91,11 +91,11 @@ plugins/my-plugin/            skills/my-skill/
   等价于"任意落地的 JS 会被执行"，共享机器建议关掉）。
 - 架构总览见 [doc/extend_development/skill-system.md](doc/extend_development/skill-system.md)。
 ## 安装与使用
-**Windows 桌面安装包（0.4.1）**：安装后打开 QQ Agent，在“设置 → 界面系统 → OneBot（SnowLuma）”点击“一键安装 GitHub 最新版 SnowLuma”。程序从官方稳定 Release 下载 Windows x64 完整包并校验 SHA256，安装在 `data/dependencies/`，QQ Agent 安装包本身不捆绑 SnowLuma、QQ、模型权重或登录状态。安装完成后到 SnowLuma 页启动、打开其 WebUI，完成 QQ 接入与登录；OneBot 地址及令牌在设置中配置。
+**Windows 桌面安装包（0.4.2）**：安装后打开 QQ Agent，在“设置 → 界面系统 → OneBot（SnowLuma）”点击“一键安装 GitHub 最新版 SnowLuma”。程序从官方稳定 Release 下载 Windows x64 完整包并校验 SHA256，安装在 `data/dependencies/`，QQ Agent 安装包本身不捆绑 SnowLuma、QQ、模型权重或登录状态。安装完成后到 SnowLuma 页启动、打开其 WebUI，完成 QQ 接入与登录；OneBot 地址及令牌在设置中配置。
 
 已有 SnowLuma 正在运行时，先停止后再安装/更新。旧程序保留，新版本验证成功后才切换程序目录；原配置及登录数据复制到新目录。
 
-源码构建：`npm install` 后执行 `npm run build:desktop`；Windows x64 安装包输出到 `dist/`。验证记录见 [桌面版验收](doc/desktop-release-validation.md)。
+源码构建：`npm install` 后执行 `npm run build:desktop`；Windows x64 安装包输出到 `dist/`。验证记录见 [桌面版验收](doc/desktop-release-0.4.2.md)。
 
 源码安装：
 ```bash
