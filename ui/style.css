@@ -580,6 +580,9 @@ span.unread {
   font-size: 12.5px; line-height: 1.7; color: var(--err);
   white-space: pre-wrap; word-break: break-word;
 }
+.shutdown-view { width: 100%; min-width: 0; }
+.shutdown-status { margin-bottom: 12px; font-weight: 600; }
+.shutdown-log { margin: 0; padding: 16px; height: min(50vh, 440px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg0); border: 1px solid var(--bd); border-radius: var(--r-xs); color: var(--tx); font: 13px/1.7 var(--font-mono); }
 .collapsible.error-flow { border-color: var(--err-line); }
 .tool-h, .collapsible > summary {
   display: flex; align-items: center; gap: 9px; padding: 9px 13px; cursor: pointer; list-style: none;

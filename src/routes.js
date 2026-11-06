@@ -1462,6 +1462,17 @@ export function createRoutes(deps) {
       }
     },
     {
+      method: 'POST', pattern: '/api/shutdown',
+      handler: async ({ req, res, json }) => {
+        const body = await bodyOf(req);
+        if (body.confirm !== true) return json(res, 400, { error: '请先确认停机' });
+        try {
+          const job = await deps.startShutdown(`http://${req.headers.host}`);
+          return json(res, 202, job);
+        } catch (error) { return json(res, 500, { error: error.message }); }
+      }
+    },
+    {
       method: 'POST', pattern: '/api/pause',
       handler: async ({ req, res, json }) => {
         const body = await readBody(req);

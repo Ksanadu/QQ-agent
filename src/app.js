@@ -1,4 +1,5 @@
 import { launchLocalQQ, localQQConnected } from './local-qq.js';
+import { createShutdownLauncher } from './shutdown.js';
 import { readSnowlumaLogs } from './snowluma-logs.js';
 import { captureAvatarContext } from './user-avatar.js';
 // 总装：OneBot 事件接入 → 存储 → 编排器；HTTP API + SSE 给 UI。
@@ -1111,6 +1112,24 @@ export function createApp({ log = console.log } = {}) {
 
   // 声明式路由表（src/routes.js）：把所有依赖一次性注入。
   // 路由 handler 通过闭包取用这些依赖，handleHttp 只负责匹配分发。
+  const launchShutdown = createShutdownLauncher({
+    prepare: async () => { orchestrator.setPaused(true); await orchestrator.abortAll(); },
+    stopCore: () => stop()
+  });
+  function startShutdown(origin) {
+    const cfg = getConfig();
+    const localPort = (url, fallback) => {
+      const u = new URL(url || fallback);
+      if (!['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw Error('停机仅支持本机 SnowLuma 连接');
+      return Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+    };
+    const snowPorts = [...new Set([
+      localPort(cfg.snowluma?.wsUrl, 'ws://127.0.0.1:3001'),
+      localPort(cfg.snowluma?.httpUrl, 'http://127.0.0.1:3000'), snowlumaWebuiPort()
+    ])];
+    return launchShutdown({ origin, root: ROOT, snowlumaDir: snowlumaDir(),
+      snowPorts, agentPort: server.address().port, logDir: path.join(DATA_DIR, 'logs') });
+  }
   const apiRoutes = createRoutes({
     store, memory, sessions, onebot, orchestrator,
     emit, log,
@@ -1123,7 +1142,7 @@ export function createApp({ log = console.log } = {}) {
     getSnowlumaLogs,
     visionScan, isPortOpen,
     buildUsageStats, buildUsageBreakdown,
-    reloadSkills
+    reloadSkills, startShutdown
   });
 
   async function handleHttp(req, res) {

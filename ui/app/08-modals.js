@@ -1,5 +1,54 @@
 // 〔通用弹窗外壳 / 模型选择 / 人设 / 白名单 / saveConfig〕——M9 拆分第 9 段
 'use strict';
+let shutdownInProgress = false;
+async function openShutdownDialog() {
+  if (shutdownInProgress) return;
+  if (!(await uiConfirm('确认停机？\n将中止当前任务，先停止 SnowLuma，再停止本机 QQ-Agent 进程树并检查端口。完成后 3 秒关闭此标签页。'))) return;
+  shutdownInProgress = true;
+  const overlay = modelModalShell({ head: '停机日志',
+    body: '<div class="shutdown-view"><div class="shutdown-status" role="status">正在准备停机…</div><pre class="shutdown-log" role="log" aria-live="polite"></pre></div>',
+    foot: '<button class="btn btn-small shutdown-close" disabled>关闭日志</button>' });
+  // Keep the execution transcript visible until completion or failure.
+  overlay.querySelector('.model-modal-close').disabled = true;
+  overlay.addEventListener('click', e => { if (e.target === overlay) e.stopImmediatePropagation(); }, true);
+  document.removeEventListener('keydown', overlay._keyHandler);
+  const status = overlay.querySelector('.shutdown-status'), log = overlay.querySelector('.shutdown-log');
+  const close = overlay.querySelector('.shutdown-close');
+  close.addEventListener('click', () => closeModelModal(overlay));
+  try {
+    const job = await api('/api/shutdown', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+    const call = async (route, method = 'GET') => {
+      const res = await fetch(job.url + route, { method, headers: { 'x-shutdown-token': job.token }, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw Error(`停机助手返回 HTTP ${res.status}`);
+      return res.json();
+    };
+    let snapshot = await call('/run', 'POST');
+    const deadline = Date.now() + 180000;
+    while (true) {
+      log.textContent = snapshot.logs.map(l => `[${new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })}] ${l.text}`).join('\n');
+      log.scrollTop = log.scrollHeight;
+      status.textContent = snapshot.status === 'done' ? '停机完成' : snapshot.status === 'failed' ? '停机失败' : '正在停机…';
+      if (snapshot.status === 'failed') throw Error(`请按日志处理后重试。日志文件：${snapshot.logFile}`);
+      if (snapshot.status === 'done') break;
+      if (Date.now() > deadline) throw Error('停机超时，请查看本机 data/logs/shutdown 日志。');
+      await new Promise(r => setTimeout(r, 400));
+      snapshot = await call('/status');
+    }
+    for (let seconds = 3; seconds > 0; seconds--) {
+      status.textContent = `停机完成 · ${seconds} 秒后关闭标签页`;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    window.close();
+    status.textContent = '已停机，可手动关闭此标签页';
+  } catch (e) {
+    status.textContent = '停机未完成';
+    log.textContent += `\n${e.message}`;
+  } finally {
+    shutdownInProgress = false;
+    close.disabled = false;
+    overlay.querySelector('.model-modal-close').disabled = false;
+  }
+}
 // ── 模型选择/添加/删除 模态框 ──
 function closeAnimatedOverlay(overlay) {
   if (!overlay || overlay.classList.contains('closing')) return;

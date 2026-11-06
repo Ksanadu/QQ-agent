@@ -82,6 +82,7 @@ $('#pause-btn').addEventListener('click', async () => {
     refreshStatus();
   }
 });
+$('#shutdown-btn')?.addEventListener('click', () => openShutdownDialog());
 
 // ── 会话渲染合批 ──
 // 运行中的会话 SSE 事件非常密：每轮"正在思考…"开/关两次 + 每个工具调用一次。
