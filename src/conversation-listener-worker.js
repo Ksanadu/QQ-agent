@@ -36,9 +36,9 @@ async function check() {
       until = Date.now() + workerData.idleMs; arm();
       anchor = [...anchor, ...entries.filter(m => verdict.ids.includes(m.id))].slice(-20);
     }
-    parentPort.postMessage({ type: 'check', ...verdict, usage: response.usage, until });
+    parentPort.postMessage({ type: 'check', ...verdict, entries, checkedAt: Date.now(), usage: response.usage, until });
   } catch (e) {
-    if (!closed) parentPort.postMessage({ type: 'check', related: false, ids: [], reason: '关联判断暂不可用', error: String(e.message).slice(0, 200), until });
+    if (!closed) parentPort.postMessage({ type: 'check', related: false, ids: [], reason: '关联判断暂不可用', error: String(e.message).slice(0, 200), entries, checkedAt: Date.now(), until });
   } finally {
     clearTimeout(timeout); running = false;
     if (!closed && queue.length) debounce = setTimeout(() => { debounce = null; check(); }, workerData.batchDelayMs);

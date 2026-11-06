@@ -561,12 +561,14 @@ function renderSessionDetail(s) {
       llmMessages: (s.messages || []).filter((m) => m.role === 'assistant').map((m) => ({
         role: m.role,
         content: m.content,
+        reasoningSummary: m.reasoningSummary || null,
         tool_calls: m.tool_calls ?? null,
         raw: m.raw ?? null
       })),
       toolResults: (s.messages || []).filter((m) => m.toolCall).map((m) => ({
         toolCall: m.toolCall
       })),
+      listenerChecks: (s.messages || []).filter(m => m.listenerCheck).map(m => m.listenerCheck),
       sent: s.sent || [],
       usage: s.usage || null,
       status: s.status,
@@ -597,7 +599,27 @@ function renderSessionDetail(s) {
   html.push('<div class="msg-flow">');
   if (!jsonMode) {
     for (const item of s.messages || []) {
-      if (item.toolCall) {
+      if (item.listenerCheck) {
+        const check = item.listenerCheck;
+        const related = new Set(check.ids || []);
+        const entries = check.entries || [];
+        const label = check.error ? '判定失败' : check.related ? '相关' : '不相关';
+        const messageText = entries.map(m => {
+          const chosen = check.related && related.has(m.id) ? ' · 选为相关消息' : '';
+          const mid = m.messageId != null ? `#${m.messageId}` : `本地 ID ${m.id}`;
+          return `${m.ts ? fmtClock(m.ts) + ' · ' : ''}${m.sender || '未知发送者'}${m.senderId ? ` (QQ:${m.senderId})` : ''} · ${mid}${chosen}\n${m.text || '（无文本）'}${m.replyTo != null ? `\n引用 #${m.replyTo}` : ''}`;
+        }).join('\n\n');
+        html.push(`
+          <details class="collapsible tool-flow listener-flow">
+            <summary><span class="tool-ico">👂</span><span class="tool-name-flow">关联判定</span>
+              <span class="tool-label">${check.checkedAt ? esc(fmtClock(check.checkedAt)) + ' · ' : ''}${entries.length} 条消息</span>
+              <span class="badge ${check.error ? 'err' : check.related ? 'ok' : ''}">${label}</span></summary>
+            <div class="coll-body"><strong>判定依据</strong><div class="tool-result">${esc(check.reason || '未返回判定依据')}</div>
+              ${check.error ? `<div class="tool-result is-error">${esc(check.error)}</div>` : ''}
+              <strong>对应消息</strong><div class="tool-result">${esc(messageText || `旧记录未保存消息正文${related.size ? '；相关本地 ID：' + [...related].join('、') : ''}`)}</div>
+            </div>
+          </details>`);
+      } else if (item.toolCall) {
         const meta = (typeof TOOL_META === 'object' && TOOL_META) ? TOOL_META[item.toolCall.name] : null;
         const ico = meta?.icon || '⚒';
         const label = meta?.name || item.toolCall.name;
@@ -626,13 +648,18 @@ function renderSessionDetail(s) {
             <div class="coll-body muted">已作为图像输入注入模型</div>
           </details>`);
       } else if (item.role === 'assistant') {
+        if (typeof item.reasoningSummary === 'string' && item.reasoningSummary.trim()) {
+          html.push(`<details class="collapsible tool-flow think-flow reasoning-flow">
+            <summary><span class="tool-ico">💭</span><span class="tool-name-flow">推理摘要</span><span class="tool-label">接口返回</span></summary>
+            <div class="coll-body think-body">${esc(item.reasoningSummary)}</div></details>`);
+        }
         const text = typeof item.content === 'string' ? item.content : '';
         if (item.tool_calls && item.tool_calls.length && !text.trim()) continue; // 纯工具调用轮，卡片已展示
         html.push(`
           <details class="collapsible tool-flow think-flow">
             <summary>
               <span class="tool-ico">💭</span>
-              <span class="tool-name-flow">思考</span>
+              <span class="tool-name-flow">模型输出</span>
               <span class="tool-label">不发送</span>
             </summary>
             <div class="coll-body think-body">${esc(text || '（无文本输出，仅调用工具）')}</div>

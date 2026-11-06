@@ -3,7 +3,7 @@ import { bootApp, waitFor, sleep } from './_harness.mjs';
 
 // Actual worker -> mock LLM -> main orchestrator handoff, no keyword shortcut.
 const env = await bootApp({ config: { wakeDelayMs: 30, store: { contextTier: 1, contextSliderPos: 10, peakSchedule: { enabled: false } }, conversationListener: { enabled: true, idleMs: 4000 } }, script: [
-  { toolCalls: [{ name: 'send_message', args: { messages: '第一张构图不错，你想比较哪里？' } }, { name: 'finish', args: { summary: '已回复' } }] },
+  { reasoning: '先确认用户想比较的方面。', toolCalls: [{ name: 'send_message', args: { messages: '第一张构图不错，你想比较哪里？' } }, { name: 'finish', args: { summary: '已回复' } }] },
   { content: JSON.stringify({ related: false, ids: [], reason: '群友在聊别的游戏' }) },
   { content: JSON.stringify({ related: true, ids: [4, 99999], reason: '继续回答机器人的比较问题' }) },
   { toolCalls: [{ name: 'send_message', args: { messages: '第二张可以再看一下光线。' } }, { name: 'finish', args: { summary: '已跟进' } }] }
@@ -31,6 +31,19 @@ try {
   assert.ok(sessions.some(s => s.followUpFromListener && s.trigger.some(m => m.mid === -503)));
   const child = sessions.find(s => s.taskType === 'conversation-listener' && s.usage.calls === 2);
   assert.ok(child?.parentSessionId); assert.ok(child.usage.totalTokens > 0);
+  const parent = app.sessions.get(child.parentSessionId);
+  assert.equal(parent.messages.find(m => m.role === 'assistant').reasoningSummary, '先确认用户想比较的方面。');
+  const verdicts = child.messages.filter(m => m.listenerCheck).map(m => m.listenerCheck);
+  assert.equal(verdicts[0].related, false);
+  assert.equal(verdicts[0].entries[0].messageId, -502);
+  assert.equal(verdicts[0].entries[0].text, '有人打游戏吗');
+  assert.equal(verdicts[1].entries[0].senderId, '777');
+  assert.equal(verdicts[1].entries[0].messageId, -503);
+  assert.equal(verdicts[1].reason, '继续回答机器人的比较问题');
+  assert.ok(verdicts.every(v => v.checkedAt > 0));
+  const apiChild = await env.request('GET', `/api/sessions/${child.id}`);
+  assert.deepEqual(apiChild.data.messages, child.messages);
+  assert.ok(llm.state.requests.every(r => r.messages.every(m => !('reasoningSummary' in m))));
   await waitFor(() => app.orchestrator.listeners.tasks.size === 0, 8000, 'idle worker exits');
   const before = llm.state.requests.length;
   pushGroupMsg(777, '甲', '窗口已经结束，不要再自动接话', -504);

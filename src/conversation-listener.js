@@ -1,7 +1,7 @@
 import { Worker } from 'node:worker_threads';
 
 export function listenerMessage(m) {
-  return { id: m.id, messageId: m.mid, senderId: m.senderId, sender: m.self ? '机器人' : m.senderName,
+  return { id: m.id, messageId: m.mid, ts: m.ts, senderId: m.senderId, sender: m.self ? '机器人' : m.senderName,
     self: Boolean(m.self), text: String(m.text || '').slice(0, 1200), replyTo: m.reply?.messageId ?? null };
 }
 

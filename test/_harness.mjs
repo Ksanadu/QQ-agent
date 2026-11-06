@@ -274,6 +274,7 @@ export function createMockLLM() {
       if (!scripted) scripted = { content: '（默认：无动作）' };
       if (scripted.delayMs) await sleep(scripted.delayMs);
       const message = { role: 'assistant', content: scripted.content ?? null };
+      if (scripted.reasoning != null) message.reasoning_content = scripted.reasoning;
       if (scripted.toolCalls) {
         message.tool_calls = scripted.toolCalls.map((tc, i) => ({
           id: `call_${step}_${i}`,

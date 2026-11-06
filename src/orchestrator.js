@@ -81,7 +81,8 @@ export class Orchestrator {
         if (sub) {
           addUsage(sub.usage, event.usage);
           if (event.usage) sub.usage.calls++;
-          sub.messages.push({ listenerCheck: { ids: event.ids, related: event.related, reason: event.reason, error: event.error } });
+          sub.messages.push({ listenerCheck: { ids: event.ids, related: event.related, reason: event.reason, error: event.error,
+            checkedAt: event.checkedAt, entries: event.entries || [] } });
           this.sessions.update(sub.id); this.emit('session-update', sub.id);
         }
         this.emit('listener-check', { chatKey, related: event.related, ids: event.ids, reason: event.reason });
@@ -1070,11 +1071,13 @@ export class Orchestrator {
       const assistantEntry = {
         role: 'assistant',
         content: finalContent,
-        tool_calls: finalToolCalls,
-        raw: response.raw ?? null
+        tool_calls: finalToolCalls
       };
       messages.push(assistantEntry);
-      session.messages.push(structuredClone(assistantEntry));
+      // Display-only metadata: do not feed returned reasoning into later requests.
+      session.messages.push({ ...structuredClone(assistantEntry),
+        raw: structuredClone(response.raw ?? null),
+        ...(typeof response.reasoning === 'string' && response.reasoning.trim() ? { reasoningSummary: response.reasoning } : {}) });
       session.rounds = round + 1;
       markActivity('');
 

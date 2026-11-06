@@ -574,6 +574,8 @@ span.unread {
   font-size: 12.5px; line-height: 1.7; color: var(--tx2);
   white-space: pre-wrap; word-break: break-word;
 }
+.listener-flow .coll-body { white-space: normal; }
+.collapsible.listener-flow .tool-result { font-family: inherit; font-size: 12.5px; line-height: 1.7; }
 .error-body {
   font-size: 12.5px; line-height: 1.7; color: var(--err);
   white-space: pre-wrap; word-break: break-word;
