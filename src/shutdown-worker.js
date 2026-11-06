@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { runShutdown } from './shutdown-plan.js';
 
 const ps = fileURLToPath(new URL('./shutdown-processes.ps1', import.meta.url));
+const pageDir = fileURLToPath(new URL('../ui/shutdown/', import.meta.url));
+const pageAssets = new Map([['/', ['index.html', 'text/html']], ['/shutdown.js', ['shutdown.js', 'text/javascript']], ['/shutdown.css', ['shutdown.css', 'text/css']]]);
 const token = crypto.randomBytes(32).toString('hex');
 let config, file, server, expiry, status = 'ready';
 const logs = [];
@@ -41,14 +43,20 @@ process.once('message', async m => {
   file = path.join(config.logDir, `shutdown-${Date.now()}.log`);
   log('停机助手已就绪。');
   server = http.createServer((req, res) => {
-    const origin = req.headers.origin;
-    if (origin && origin !== config.origin) { res.writeHead(403); res.end(); return; }
-    if (!/^127\.0\.0\.1:\d+$/.test(req.headers.host || '')) { res.writeHead(403); res.end(); return; }
-    res.setHeader('Access-Control-Allow-Origin', config.origin);
-    res.setHeader('Access-Control-Allow-Headers', 'x-shutdown-token');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    const ownHost = `127.0.0.1:${server.address().port}`;
+    const ownOrigin = `http://${ownHost}`;
+    if (req.headers.host !== ownHost || (req.headers.origin && req.headers.origin !== ownOrigin)) {
+      res.writeHead(403); res.end(); return;
+    }
     res.setHeader('Cache-Control', 'no-store');
-    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
+    const asset = pageAssets.get(req.url);
+    if (asset && req.method === 'GET') {
+      res.setHeader('Content-Type', asset[1] + '; charset=utf-8');
+      res.end(fs.readFileSync(path.join(pageDir, asset[0]))); return;
+    }
     if (req.headers['x-shutdown-token'] !== token) { res.writeHead(403); res.end(); return; }
     if (req.url === '/run' && req.method === 'POST' && status === 'ready') {
       status = 'running'; clearTimeout(expiry);

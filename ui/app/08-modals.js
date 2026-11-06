@@ -3,7 +3,7 @@
 let shutdownInProgress = false;
 async function openShutdownDialog() {
   if (shutdownInProgress) return;
-  if (!(await uiConfirm('确认停机？'))) return;
+  if (!(await uiConfirm('确认停机并中止当前所有会话？'))) return;
   shutdownInProgress = true;
   const overlay = modelModalShell({ head: '停机日志',
     body: '<div class="shutdown-view"><div class="shutdown-status" role="status">正在准备停机…</div><pre class="shutdown-log" role="log" aria-live="polite"></pre></div>',
@@ -17,29 +17,7 @@ async function openShutdownDialog() {
   close.addEventListener('click', () => closeModelModal(overlay));
   try {
     const job = await api('/api/shutdown', { method: 'POST', body: JSON.stringify({ confirm: true }) });
-    const call = async (route, method = 'GET') => {
-      const res = await fetch(job.url + route, { method, headers: { 'x-shutdown-token': job.token }, signal: AbortSignal.timeout(10000) });
-      if (!res.ok) throw Error(`停机助手返回 HTTP ${res.status}`);
-      return res.json();
-    };
-    let snapshot = await call('/run', 'POST');
-    const deadline = Date.now() + 180000;
-    while (true) {
-      log.textContent = snapshot.logs.map(l => `[${new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })}] ${l.text}`).join('\n');
-      log.scrollTop = log.scrollHeight;
-      status.textContent = snapshot.status === 'done' ? '停机完成' : snapshot.status === 'failed' ? '停机失败' : '正在停机…';
-      if (snapshot.status === 'failed') throw Error(`请按日志处理后重试。日志文件：${snapshot.logFile}`);
-      if (snapshot.status === 'done') break;
-      if (Date.now() > deadline) throw Error('停机超时，请查看本机 data/logs/shutdown 日志。');
-      await new Promise(r => setTimeout(r, 400));
-      snapshot = await call('/status');
-    }
-    for (let seconds = 3; seconds > 0; seconds--) {
-      status.textContent = `停机完成 · ${seconds} 秒后关闭标签页`;
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    window.close();
-    status.textContent = '已停机，可手动关闭此标签页';
+    window.location.replace(job.url + '/#' + encodeURIComponent(job.token));
   } catch (e) {
     status.textContent = '停机未完成';
     log.textContent += `\n${e.message}`;
