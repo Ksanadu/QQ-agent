@@ -894,6 +894,19 @@ export function createRoutes(deps) {
       }
     },
 
+    {
+      method: 'POST', pattern: /^\/api\/skills\/([^/]+)\/uninstall$/,
+      handler: async ({req,res,json,match}) => {
+        const body = await bodyOf(req);
+        if (body.confirm !== true || typeof body.clearData !== 'boolean')
+          return json(res,400,{ok:false,error:'请确认卸载，并选择是否清理数据'});
+        try {
+          const result = await deps.uninstallModule(decodeURIComponent(match[1]), body.clearData);
+          return json(res,200,{...result,config:sanitizeConfig(getConfig())});
+        } catch(e) { return json(res,409,{ok:false,error:String(e.message || e)}); }
+      }
+    },
+
     // ── Skill 管理 ─────────────────────────────────────────────────────
     // 统一开关入口：前端只改这里，模块内部一律读 skillManager。
     {

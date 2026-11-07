@@ -1,3 +1,4 @@
+import { uninstallModuleFiles } from './module-uninstall.js';
 import { launchLocalQQ, localQQConnected } from './local-qq.js';
 import { createShutdownLauncher } from './shutdown.js';
 import { readSnowlumaLogs } from './snowluma-logs.js';
@@ -1142,7 +1143,7 @@ export function createApp({ log = console.log } = {}) {
     getSnowlumaLogs,
     visionScan, isPortOpen,
     buildUsageStats, buildUsageBreakdown,
-    reloadSkills, startShutdown
+    reloadSkills, uninstallModule, startShutdown
   });
 
   async function handleHttp(req, res) {
@@ -1452,7 +1453,28 @@ export function createApp({ log = console.log } = {}) {
   // （目录删除重建后 fs.watch 句柄失效、网络盘、杀毒软件）时，点多少次刷新都
   // 看不到新插件。这里把"重扫磁盘 + 激活 + 刷工具 + 重建 watcher"做成一个
   // 幂等函数，启动流程和手动重扫共用，行为完全一致。
-  async function reloadSkills({ reason = 'manual' } = {}) {
+  let extensionQueue = Promise.resolve();
+  function extensionOperation(fn) {
+    const result = extensionQueue.then(fn);
+    extensionQueue = result.catch(() => {});
+    return result;
+  }
+  function uninstallModule(id, clearData) {
+    return extensionOperation(async () => {
+      pluginWatcher?.close?.(); pluginWatcher = null;
+      try {
+        return uninstallModuleFiles({id, clearData, root:ROOT, dataDir:DATA_DIR,
+          manager:skillManager, getConfig, updateConfig});
+      } finally {
+        orchestrator.refreshToolDefs();
+        if (process.env.QQ_AGENT_DEV === '1' || getConfig().extensions?.hotReload !== false)
+          pluginWatcher = watchPlugins({ log, onReload: () => reloadSkills({reason:'watch'}) });
+        emit('status', {configUpdated:true});
+      }
+    });
+  }
+  function reloadSkills(options = {}) { return extensionOperation(() => reloadSkillsNow(options)); }
+  async function reloadSkillsNow({ reason = 'manual' } = {}) {
     const result = await loadPlugins({ log });
     for (const st of skillManager.list()) {
       if (st.enabled && st.loaded) {

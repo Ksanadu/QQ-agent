@@ -1348,7 +1348,7 @@ function renderModulePage(kind) {
         <div class="mcard-desc">${esc(s.description || '（没有写介绍）')}</div>
         ${errLine ? `<div class="mcard-err">${esc(errLine)}</div>` : ''}
       </div>
-      <div class="mcard-acts">${uploadBtn}${settingsBtn}</div>
+      <div class="mcard-acts">${uploadBtn}${settingsBtn}<button class="btn btn-small btn-danger mcard-uninstall" data-skill-id="${esc(s.id)}" aria-label="卸载 ${esc(s.name)}">卸载</button></div>
     </div>`;
   };
 
@@ -1432,6 +1432,9 @@ function bindModulePageEvents(kind) {
       openSkillSettings(btn.dataset.skillId);
     });
   });
+  scope.querySelectorAll('.mcard-uninstall').forEach(btn => btn.addEventListener('click', e => {
+    e.stopPropagation(); openModuleUninstallDialog(btn.dataset.skillId);
+  }));
   // 上传到市场（⬆ 钮）：同样 stopPropagation，且带上卡片所属类型
   scope.querySelectorAll('.mcard-upload').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -1465,7 +1468,7 @@ function bindModulePageEvents(kind) {
     };
     cardEl.addEventListener('click', toggle);
     cardEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      if (e.target === cardEl && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(); }
     });
   });
 
@@ -1621,4 +1624,25 @@ async function refreshPromptPreview(overrides = null) {
   $$('.prompt-preview-content').forEach((pre) => {
     pre.textContent = renderPromptPreviewText();
   });
+}
+
+function openModuleUninstallDialog(id) {
+  const skill = (state.skills || []).find(s => s.id === id);
+  if (!skill) return;
+  const overlay = modelModalShell({head:`卸载 ${skill.name || id}`,
+    body:'<p>卸载后将停用并移除模块，默认保留配置与数据。</p><label class="switch"><input type="checkbox" class="module-clear-data"><span class="track"><span class="thumb"></span></span><span>同时清理配置与本地数据</span></label><p class="module-uninstall-error" role="alert"></p>',
+    foot:'<button class="btn btn-small module-uninstall-cancel">取消</button><button class="btn btn-small btn-danger module-uninstall-confirm">确认卸载</button>'});
+  overlay.querySelector('.module-uninstall-cancel').onclick = () => closeModelModal(overlay);
+  const btn = overlay.querySelector('.module-uninstall-confirm');
+  btn.onclick = async () => {
+    const clearData = overlay.querySelector('.module-clear-data').checked;
+    if (clearData && !(await uiConfirm('同时删除该模块的配置与本地数据？此操作不可恢复。'))) return;
+    btn.disabled = true;
+    try {
+      const r = await api(`/api/skills/${encodeURIComponent(id)}/uninstall`, {method:'POST',body:JSON.stringify({confirm:true,clearData})});
+      if (r.config) state.config = r.config;
+      await loadModulePage('all');
+      closeModelModal(overlay);
+    } catch(e) { overlay.querySelector('.module-uninstall-error').textContent = e.message; btn.disabled = false; }
+  };
 }
