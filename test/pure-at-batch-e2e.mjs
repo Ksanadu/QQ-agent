@@ -1,54 +1,65 @@
 import assert from 'node:assert/strict';
-import {bootApp,waitFor,sleep} from './_harness.mjs';
-const env=await bootApp({config:{wakeDelayMs:800,drainDelayMs:200,conversationListener:{enabled:false}}});
-const {app,llm,pushGroupMsg,request,waitSessionDone}=env, key='group:456';
-const at={type:'at',data:{qq:'888'}};
-const reply=messages=>({toolCalls:[{name:'send_message',args:{messages}},{name:'finish',args:{summary:'已回复'}}]});
-const pure=mid=>pushGroupMsg(777,'甲','',mid,{message:[at]});
-const active=()=>app.orchestrator.activeRuns.get(key);
+import { bootApp, waitFor } from './_harness.mjs';
+
+const delay = 1200;
+const env = await bootApp({ config: { wakeDelayMs: delay, drainDelayMs: 200, conversationListener: { enabled: false } } });
+const { app, llm, pushGroupMsg, request, onebotHttp } = env;
+const key = 'group:456';
+const at = { type: 'at', data: { qq: '888' } };
+const reply = messages => ({ toolCalls: [
+  { name: 'send_message', args: { messages } }, { name: 'finish', args: { summary: '已回复' } }
+] });
+const pure = mid => pushGroupMsg(777, '甲', '', mid, { message: [at] });
+const active = () => app.orchestrator.activeRuns.get(key);
+const activity = () => app.sessions.current.get(active())?.activity;
+const getMessage = mid => app.store.findByMid(key, mid);
+const done = id => waitFor(() => {
+  const session = app.sessions.get(id);
+  return session?.status === 'done' && session;
+});
+
 try {
-  llm.state.script.push(reply('图片已收到'));
-  pure(501);
-  const id=await waitFor(active), until=app.orchestrator.replyWindows.get(key).deadline;
-  assert.equal(app.orchestrator.replyWindows.get(key).delayMs,800);
-  await sleep(240);
-  assert.equal(llm.state.requests.length,0);
-  pushGroupMsg(777,'甲','',502,{message:[{type:'image',data:{url:'https://example.com/test.png'}}]});
-  await waitFor(()=>llm.state.requests.length===1);
-  assert.ok(Date.now()<until,'content begins thinking even before initial pure-mention deadline');
-  const oldDeadline=app.orchestrator.replyWindows.get(key).deadline;
-  pure(503);
-  await waitFor(()=>app.store.findByMid(key,503)?.nudgeForSessionId===id);
-  assert.ok(app.orchestrator.replyWindows.get(key).deadline>=oldDeadline);
-  assert.equal(active(),id);
-  const session=await waitFor(()=>{const s=app.sessions.get(id);return s?.status==='done'&&s;});
-  assert.deepEqual(session.trigger.map(m=>m.mid),[501,502]);
-  assert.equal(session.trigger[1].media[0].kind,'image');
-  assert.equal(llm.state.requests.length,1,'pure nudge does not require a new model request');
-  assert.equal(env.onebotHttp.state.sends.length,1);
-  assert.ok(session.sent[0].sentAt>=app.store.findByMid(key,503).receivedAt+800);
   llm.state.script.push(reply('我在，怎么啦？'));
-  pure(520);
-  const silent=await waitFor(active);
-  const contentDeadline=app.orchestrator.replyWindows.get(key).contentDeadline;
-  await sleep(360);
-  assert.equal(llm.state.requests.length,1,'bare @ must wait for possible content');
-  pure(521);
-  await waitFor(()=>app.store.findByMid(key,521)?.nudgeForSessionId===silent);
-  const renewed=app.orchestrator.replyWindows.get(key).deadline;
-  await sleep(Math.max(0,contentDeadline-Date.now()-90));
-  assert.equal(llm.state.requests.length,1,'no model request before the first window expires');
-  await waitFor(()=>llm.state.requests.length===2);
-  assert.ok(Date.now()<renewed,'repeated bare @ does not postpone the first LLM request');
-  assert.match(JSON.stringify(llm.state.requests[1].messages),/#520/);
-  const bare=await waitFor(()=>{const s=app.sessions.get(silent);return s?.status==='done'&&s;});
-  assert.ok(bare.sent[0].sentAt>=renewed,'renewed send window still applies');
-  await request('POST','/api/config',{body:{wakeDelayMs:7000}});
+  pure(501);
+  const bareId = await waitFor(active);
+  const bareDeadline = app.orchestrator.replyWindows.get(key).deadline;
+  await waitFor(() => llm.state.requests.length === 1);
+  assert.ok(Date.now() < bareDeadline, 'bare @ reaches the LLM before the ordinary send window ends');
+  assert.match(JSON.stringify(llm.state.requests[0].messages), /#501/);
+  assert.equal(onebotHttp.state.sends.length, 0);
+  const bare = await done(bareId);
+  assert.ok(bare.sent[0].sentAt >= bareDeadline);
+  assert.equal(llm.state.requests.length, 1, 'no extra model request is needed just to wait for delivery');
+
+  llm.state.script.push(reply('不应发送的旧回复'), reply('图片已收到'));
+  pure(502);
+  const photoId = await waitFor(active);
+  await waitFor(() => activity() === '等待回复窗口…');
+  pushGroupMsg(777, '甲', '', 503, { message: [{ type: 'image', data: { url: 'https://example.com/test.png' } }] });
+  await waitFor(() => llm.state.requests.length === 3 && activity() === '等待回复窗口…');
+  assert.match(JSON.stringify(llm.state.requests[2].messages), /本轮新增消息[\s\S]*#503/);
+  const firstDeadline = app.orchestrator.replyWindows.get(key).deadline;
+  pure(504);
+  await waitFor(() => getMessage(504)?.nudgeForSessionId === photoId);
+  const renewed = app.orchestrator.replyWindows.get(key).deadline;
+  assert.ok(renewed > firstDeadline);
+  const photo = await done(photoId);
+  assert.deepEqual(photo.trigger.map(m => m.mid), [502, 503]);
+  assert.equal(photo.trigger[1].media[0].kind, 'image');
+  assert.deepEqual(photo.sent.map(m => m.text), ['图片已收到']);
+  assert.ok(photo.sent[0].sentAt >= renewed);
+  assert.equal(llm.state.requests.length, 3, 'a later bare @ renews sending without a model rerun');
+  assert.equal(onebotHttp.state.sends.length, 2);
+
+  await request('POST', '/api/config', { body: { wakeDelayMs: 7000 } });
+  llm.state.script.push(reply('中止后不能发送'));
   pure(530);
-  const cancelled=await waitFor(active);
-  assert.equal((await request('POST','/api/sessions/'+cancelled+'/abort',{body:{}})).status,200);
-  await waitFor(()=>!active());
-  assert.equal(app.sessions.get(cancelled).status,'aborted');
-  assert.equal(llm.state.requests.length,2);
-  console.log('PASS pure @ opens one session, waits for content, hands bare mentions to the model at the original deadline, and remains cancellable');
-} finally {await env.teardown();}
+  const cancelled = await waitFor(active);
+  await waitFor(() => activity() === '等待回复窗口…');
+  assert.equal((await request('POST', '/api/sessions/' + cancelled + '/abort', { body: {} })).status, 200);
+  await waitFor(() => !active());
+  assert.equal(app.sessions.get(cancelled).status, 'aborted');
+  assert.equal(llm.state.requests.length, 4);
+  assert.equal(onebotHttp.state.sends.length, 2);
+  console.log('PASS bare @ thinks immediately, follows ordinary delivery timing and late-input handling, and remains cancellable');
+} finally { await env.teardown(); }

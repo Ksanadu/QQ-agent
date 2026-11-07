@@ -718,12 +718,6 @@ export class Orchestrator {
     const abortSignal = abortController.signal;
     if (this.aborted || this.sessionAbortMarks.has(session.id)) throw Error('会话已被用户中止');
     if (window) {
-      if (window.entries.every(m => m.pureBotMention || m.recalled)) {
-        session.activity = '等待附加内容…';
-        this.sessions.update(session.id);
-        this.emit('session-update', session.id);
-      }
-      await window.waitForContent(m => !m.pureBotMention && !m.recalled, abortSignal);
       triggerEntries = window.entries.filter(m => !m.recalled);
       if (!triggerEntries.length && !window.pending) {
         session.finishReason = '触发消息已撤回';

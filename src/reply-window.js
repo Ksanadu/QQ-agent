@@ -13,8 +13,6 @@ export class ReplyWindow {
     this.actors = new Set(entries.map(m => String(m.senderId)));
     this.delayMs = delayMs;
     this.deadline = receivedAt + delayMs;
-    // A bare @ can only defer the first model request by one configured window.
-    this.contentDeadline = this.deadline;
     this.fromListener = fromListener;
     this.version = 0;
     this.pending = 0;
@@ -64,15 +62,6 @@ export class ReplyWindow {
   async waitForInputs(signal) {
     while (this.pending) await this.#wait(2147483647, signal);
     signal.throwIfAborted();
-  }
-
-  async waitForContent(isContent, signal) {
-    while (!this.entries.some(isContent)) {
-      const left = this.contentDeadline - Date.now();
-      if (left <= 0) return false;
-      await this.#wait(left, signal);
-    }
-    return true;
   }
 
   async waitToSend(version, signal, onWait) {
