@@ -1184,6 +1184,8 @@ td b, .tbl td b { color: var(--tx); font-weight: 600; }
 }
 .tool-card.enabled { border-left-color: var(--ok); background: var(--ok-soft); }
 .tool-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.tool-count-input.inp { width: 84px; }
+.tool-count-input.inp:invalid { border-color: var(--err); }
 .tool-dep-warn {
   font-size: 10px; padding: 1px 6px; border-radius: var(--r-full);
   border: 1px solid var(--err-line); color: var(--err); background: var(--err-soft);

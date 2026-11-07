@@ -1476,8 +1476,10 @@ async function saveConfig({ quiet = false } = {}) {
   }
 
   if (sec === 'tools') {
-    // 工具配置直接从 state.config.tools 读取（事件绑定已实时更新）
-    patch.tools = state.config.tools || { enabled: true, overrides: {}, categories: {} };
+    // 开关由事件同步到 state；数字设置从表单收集。
+    patch.tools = { ...(c.tools || { enabled: true, overrides: {}, categories: {} }) };
+    const limit = el('#cfg-list-stickers-limit');
+    if (limit?.validity.valid) patch.tools.listStickersLimit = limit.valueAsNumber;
   }
 
   // ── POST 之前的最后防线：去掉"空 patch"造成的无谓请求 ──

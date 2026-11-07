@@ -6,7 +6,7 @@
 //
 // 重构说明：所有工具通过 registerTool() 注册到 tool-registry.js，
 // 支持在设置页按卡片勾选启用/禁用。
-import { getConfig } from './config.js';
+import { getConfig, normalizeListStickersLimit } from './config.js';
 import { registerChatFeatureTools } from './chat-feature-tools.js';
 import { assertDeliveryAllowed } from './chat-policy.js';
 import { recordSendMessageDelivery, hasSendMessageDelivery, DELIVERY_REQUIRED } from './reply-completion.js';
@@ -333,12 +333,13 @@ function registerAllTools() {
       type: 'object',
       properties: {
         query: { type: 'string', description: '可选搜索词，匹配备注/笔记/标签' },
-        limit: { type: 'integer', description: '最多返回条数，默认 24' }
+        limit: { type: 'integer', description: '仅在需要临时指定返回条数（1–100）时填写；通常省略，使用设置中的默认条数' }
       }
     },
     async execute(ctx, args) {
       try {
-        const result = await ctx.stickers.list(String(args.query ?? ''), Math.min(100, Math.max(1, Number(args.limit) || 24)));
+        const defaultLimit = normalizeListStickersLimit(getConfig().tools?.listStickersLimit);
+        const result = await ctx.stickers.list(String(args.query ?? ''), normalizeListStickersLimit(args.limit, defaultLimit));
         return ok(result);
       } catch (error) {
         return err(error?.message ?? error);

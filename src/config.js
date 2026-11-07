@@ -24,6 +24,13 @@ export const FIXED_PRICE_REMOTE_URL = 'https://kondius.cn/qq-agent/model-prices.
 export const DATA_DIR = process.env.QQ_AGENT_DATA_DIR || path.join(ROOT, `data${profileSuffix()}`);
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
+const DEFAULT_LIST_STICKERS_LIMIT = 24;
+
+export function normalizeListStickersLimit(value, fallback = DEFAULT_LIST_STICKERS_LIMIT) {
+  const n = Number(value);
+  return Number.isFinite(n) && n !== 0 ? Math.max(1, Math.min(100, Math.trunc(n))) : fallback;
+}
+
 export const DEFAULT_CONFIG = {
   // OpenAI 兼容 API（必填才能跑）
   api: {
@@ -336,6 +343,7 @@ export const DEFAULT_CONFIG = {
   // 模块不允许再写自己的 isXxxEnabled 影子开关。
   tools: {
     enabled: true,              // 全局开关：false 时所有工具都禁用
+    listStickersLimit: DEFAULT_LIST_STICKERS_LIMIT,
     overrides: {},              // { [toolId]: boolean } 单个工具的启用状态
     // 跨会话发送（默认关）：开启后 send_message 支持 targetChatKey，
     // 允许模型按用户指示把消息发到白名单内的其它群/私聊。
@@ -409,7 +417,11 @@ export function loadConfig() {
     let text = fs.readFileSync(CONFIG_FILE, 'utf8');
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     const parsed = JSON.parse(text);
-    return deepMerge(DEFAULT_CONFIG, stripObsoleteFields(migrateLegacySkills(parsed)));
+    const config = deepMerge(DEFAULT_CONFIG, stripObsoleteFields(migrateLegacySkills(parsed)));
+    if (Object.hasOwn(config.tools ?? {}, 'listStickersLimit')) {
+      config.tools.listStickersLimit = normalizeListStickersLimit(config.tools.listStickersLimit);
+    }
+    return config;
   } catch (error) {
     // ⚠️ 配置文件坏了（手改错/磁盘故障）不能静默回落默认值：
     //   曾经直接返回 DEFAULT，随后任何 updateConfig（比如 5 分钟一次的
@@ -607,6 +619,9 @@ export function updateConfig(patch) {
   // 回填现值；想真清除必须显式传 apiKey: ''（专用清除按钮就是显式空串路径）。
   preserveSanitizedSecrets(getConfig(), cleanObsolete);
   currentConfig = deepMerge(getConfig(), cleanObsolete);
+  if (Object.hasOwn(currentConfig.tools ?? {}, 'listStickersLimit')) {
+    currentConfig.tools.listStickersLimit = normalizeListStickersLimit(currentConfig.tools.listStickersLimit);
+  }
   // 模型配置编辑的是当前提供商的连接信息；聊天、模型目录和连通性测试
   // 必须读到同一组 URL / Key，不能只改顶层却继续使用目录里的旧值。
   const apiPatch = cleanObsolete.api;

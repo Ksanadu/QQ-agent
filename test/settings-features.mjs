@@ -57,5 +57,28 @@ try {
     assert.equal((await env.request('GET', '/api/snowluma/logs')).data.logs.length, 500);
     assert.equal((await env.request('POST', '/api/qq-portable/stop', { body: {} })).status, 404);
     console.log('PASS archive deletion persists and new messages recreate it; obsolete active mode and QQ kernel routes removed');
+
+    const { buildToolDefs, executeTool } = await import('../src/tools.js');
+    const { formatStickerList } = await import('../src/stickers.js');
+    const { loadConfig } = await import('../src/config.js');
+    const defs = buildToolDefs();
+    const stickers = Array.from({ length: 105 }, (_, i) => ({ id: `sticker-${i}`, desc: i % 2 ? '笑' : '哭' }));
+    const lookup = async (args) => JSON.parse((await executeTool(defs, {
+      stickers: { list: (query, limit) => formatStickerList(stickers, query, limit) }
+    }, 'list_stickers', JSON.stringify(args))).content);
+    assert.equal((await lookup({})).stickers.length, 24);
+    const result = await env.request('POST', '/api/config', { body: { tools: { listStickersLimit: 36 } } });
+    assert.equal(result.data.config.tools.listStickersLimit, 36);
+    assert.equal(loadConfig().tools.listStickersLimit, 36);
+    const filtered = await lookup({ query: '笑' });
+    assert.equal(filtered.stickers.length, 36);
+    assert.ok(filtered.stickers.every(s => s.desc === '笑'));
+    assert.equal((await lookup({ limit: 50 })).stickers.length, 50);
+    assert.equal((await lookup({ limit: 200 })).stickers.length, 100);
+    assert.equal((await lookup({ limit: -1 })).stickers.length, 1);
+    const clamped = await env.request('POST', '/api/config', { body: { tools: { listStickersLimit: 200 } } });
+    assert.equal(clamped.data.config.tools.listStickersLimit, 100);
+    assert.equal((await lookup({})).stickers.length, 100);
+    console.log('PASS list_stickers default persists, takes effect without rebuilding tools, preserves explicit limits and filters');
   } finally { await env.teardown(); }
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

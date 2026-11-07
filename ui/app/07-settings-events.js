@@ -254,11 +254,16 @@ function bindSettingsEvents(c) {
     renderSettings();
   });
   $('#tools-reset')?.addEventListener('click', () => {
-    state.config.tools = { enabled: true, overrides: {}, categories: { __replace__: {} } };
+    state.config.tools = { enabled: true, overrides: {}, categories: { __replace__: {} }, listStickersLimit: DEFAULT_LIST_STICKERS_LIMIT };
+    const limit = $('#cfg-list-stickers-limit');
+    if (limit) limit.value = DEFAULT_LIST_STICKERS_LIMIT;
     markDirty($('#cfg-tools-enabled'));
     flushSave();
     renderSettings();
   });
+
+  const listStickersLimit = $('#cfg-list-stickers-limit');
+  listStickersLimit?.addEventListener('change', () => listStickersLimit.reportValidity());
 
   /** 实时更新提示词预览（旧版在前端拼静态模板，已改为后端同源组装） */
   function updatePromptPreview() {

@@ -55,6 +55,7 @@ qa.state.skills = [];
 qa.state.toolRegistry = [
   { id: 'send_message', category: 'messaging', icon: '💬', description: '发送文字。' },
   { id: 'send_to', category: 'messaging', icon: '📨', description: '跨会话发送。' },
+  { id: 'list_stickers', category: 'sticker', icon: '📋', description: '查看收藏表情。' },
   { id: 'web_search', category: 'web', icon: '🔍', description: '搜索网页。' },
   { id: 'inactive__tool', category: 'web', skillId: 'inactive' }
 ];
@@ -103,8 +104,8 @@ try {
 
   show('tools');
   assert.equal(q('#card-tools-list'), null);
-  assert.equal(w.document.querySelectorAll('#settings-form > .setcard').length, 2);
-  assert.equal(w.document.querySelectorAll('.tool-checkbox').length, 3);
+  assert.equal(w.document.querySelectorAll('#settings-form > .setcard').length, 3);
+  assert.equal(w.document.querySelectorAll('.tool-checkbox').length, 4);
   const messaging = q('#card-tools-messaging'), web = q('#card-tools-web');
   messaging.querySelector('.fold-head').click(); web.querySelector('.fold-head').click();
   messaging.querySelector('.fold-head').click();
@@ -122,6 +123,21 @@ try {
   assert.equal(Object.keys(qa.state.config.tools.categories).length, 0);
   q('#tools-disable-all').click(); await new Promise(r => setTimeout(r, 10));
   assert.equal(w.saved.at(-1).tools.enabled, false);
+  q('#card-tools-sticker .fold-head').click();
+  const limit = q('[data-tool-id="list_stickers"].tool-card #cfg-list-stickers-limit');
+  assert.equal(limit.value, '24');
+  limit.value = '36';
+  limit.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 650));
+  assert.equal(qa.state.config.tools.listStickersLimit, 36, 'the edited count autosaves');
+  show('tools');
+  assert.equal(q('#cfg-list-stickers-limit').value, '36');
+  q('#cfg-list-stickers-limit').value = '101';
+  await save();
+  assert.equal(qa.state.config.tools.listStickersLimit, 36, 'invalid edits do not overwrite the count');
+  q('#tools-reset').click(); await new Promise(r => setTimeout(r, 10));
+  assert.equal(qa.state.config.tools.listStickersLimit, 24);
+  assert.equal(q('#cfg-list-stickers-limit').value, '24');
   console.log('PASS tools use sibling settings cards; folds stay independent; switches and bulk actions persist');
 
   const installed = [];

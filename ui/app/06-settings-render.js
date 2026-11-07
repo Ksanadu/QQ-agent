@@ -1493,6 +1493,8 @@ function bindModulePageEvents(kind) {
   }
 }
 
+const DEFAULT_LIST_STICKERS_LIMIT = 24;
+
 function renderToolsSection(c) {
   // 技能失活（未启用 / 加载失败 / 依赖未就绪）时，它注册的工具整组**不再显示** ——
   // 与提示词口径一致（orchestrator 的 getToolAvailability 过滤，失活技能的工具
@@ -1558,6 +1560,16 @@ function renderToolsSection(c) {
             ${disabledByDep ? '<span class="tool-dep-warn">依赖未满足</span>' : ''}
             ${isSendTo ? '<span class="tool-dep">目标须在白名单内</span>' : ''}
           </div>
+          ${t.id === 'list_stickers' ? `
+            <div class="setrow">
+              <label class="sr-l" for="cfg-list-stickers-limit">
+                <b>默认返回条数</b><span>1–100 条</span>
+              </label>
+              <div class="sr-r">
+                <input class="inp tool-count-input" id="cfg-list-stickers-limit" type="number"
+                  min="1" max="100" step="1" required value="${esc(toolsCfg.listStickersLimit ?? DEFAULT_LIST_STICKERS_LIMIT)}" />
+              </div>
+            </div>` : ''}
         </div>`;
     }).join('');
 
