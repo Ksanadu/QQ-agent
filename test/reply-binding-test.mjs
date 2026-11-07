@@ -48,7 +48,7 @@ assert.match(prompt, /请求消息 #301 → 引用目标 #-101/);
 assert.match(prompt, /请求消息 #302 → 引用目标 #-102/);
 assert.match(prompt, /这才是被引用内容的结尾/);
 assert.match(prompt, /get_message_images\(messageId=-101\)/);
-assert.ok(prompt.indexOf('【本轮引用对象绑定】') < prompt.indexOf('【未读信息】以下是'));
+assert.ok(prompt.indexOf('【本轮引用对象绑定】') < prompt.indexOf('【本轮输入】以下是'));
 assert.ok(!prompt.includes('[引用 甲：完整评价对象A。[引用'), 'Do not duplicate the inline quote');
 const found = findMessageWithReply({ chatKey, store: absentStore, triggerEntries: [a] }, -101);
 assert.equal(found.text, fullText); assert.equal(found.media[0].url, 'https://example.com/correct.png');

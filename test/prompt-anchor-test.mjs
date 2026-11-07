@@ -67,14 +67,13 @@ function runOnce(triggerEntries, prevAnchor) {
   });
   return { up, session };
 }
-// 前缀 = 从【记忆】到【未读信息】之前的字节。锚定轮的【新已读信息】属于
+// 前缀 = 从【记忆】到【本轮输入】之前的字节。锚定轮的【新已读信息】属于
 // 追加部分（缓存前缀之后的字节），比较时剥掉 —— 前缀定义 = 记忆+已读信息。
-// ⚠️ 用完整段头定位：引导说明正文里引用了"【已读信息】【未读信息】"字样，
-// 浅 indexOf 会提前命中正文行，导致"未读在记忆之前"的假定位。
+// 用完整段头定位，避免匹配引导说明里的段名。
 const prefixOf = (up) => {
   const s = up.indexOf('【记忆】\n');
-  const e = up.indexOf('【未读信息】以下是');
-  assert.ok(s >= 0 && e > s, '段落定位失败（缺记忆/未读信息段）');
+  const e = up.indexOf('【本轮输入】以下是');
+  assert.ok(s >= 0 && e > s, '段落定位失败（缺记忆/本轮输入段）');
   let seg = up.slice(s, e);
   const extra = seg.indexOf('【新已读信息】以下是');
   if (extra >= 0) seg = seg.slice(0, extra);
@@ -109,7 +108,7 @@ const readSec2 = r2.up.slice(r2.up.indexOf('【已读信息】以下是'), r2.up
 assert.ok(['B','C','D','E','F'].every((x) => hasMsg(readSec2, x)), '锚定轮已读信息 = 锚点 BCDEF');
 assert.ok(!hasMsg(readSec2, 'G'), 'G 不在已读信息（它是追加条目）');
 // 【新已读信息】= G（锚点之后新沉淀的 1 条，≤ 预算 2）
-const extraSec2 = r2.up.slice(r2.up.indexOf('【新已读信息】以下是'), r2.up.indexOf('【未读信息】以下是'));
+const extraSec2 = r2.up.slice(r2.up.indexOf('【新已读信息】以下是'), r2.up.indexOf('【本轮输入】以下是'));
 assert.ok(hasMsg(extraSec2, 'G'), 'G 应进新已读信息');
 // 字节前缀（记忆+已读信息）与轮 1 完全一致 —— 缓存命中的核心断言
 assert.equal(prefixOf(r2.up), prefix1, '锚定轮前缀必须与上轮逐字节一致');
@@ -122,7 +121,7 @@ const I = pushUnread('uA', '甲', 'I');
 const r3 = runOnce([I], anchor2);
 assert.equal(r3.session.promptAnchorMode, 'anchored', '追加 = 预算上限（2 条：G、H）仍应锚定');
 assert.equal(prefixOf(r3.up), prefix1, '追加到预算上限时前缀仍逐字节一致');
-const extraSec3 = r3.up.slice(r3.up.indexOf('【新已读信息】以下是'), r3.up.indexOf('【未读信息】以下是'));
+const extraSec3 = r3.up.slice(r3.up.indexOf('【新已读信息】以下是'), r3.up.indexOf('【本轮输入】以下是'));
 assert.ok(hasMsg(extraSec3, 'G') && hasMsg(extraSec3, 'H'), '新已读 = G、H（两条追加）');
 assert.equal(r3.session.pastStateCount, 7, '锚定轮 pastStateCount = 5 锚点 + 2 追加');
 const anchor3 = r3.session.promptAnchorState;
@@ -133,7 +132,7 @@ const r4 = runOnce([J], anchor3);
 assert.equal(r4.session.promptAnchorMode, 'reset', '追加将超出 maxExtraRead → 整体重置');
 assert.ok(!r4.up.includes('【新已读信息】以下是'), '重置轮无新已读段');
 // 重置后回到标准滑窗（historyCount=5）：EFGHI
-const readSec4 = r4.up.slice(r4.up.indexOf('【已读信息】以下是'), r4.up.indexOf('【未读信息】以下是'));
+const readSec4 = r4.up.slice(r4.up.indexOf('【已读信息】以下是'), r4.up.indexOf('【本轮输入】以下是'));
 assert.ok(['E','F','G','H','I'].every((x) => hasMsg(readSec4, x)) && !hasMsg(readSec4, 'D'), '重置轮滑窗 = EFGHI');
 // 新锚点 = EFGHI，前缀从此重新锚定
 assert.equal(r4.session.promptAnchorState.readIds.length, 5, '重置后新锚点 = 新滑窗');
@@ -190,7 +189,7 @@ assert.equal(rN.session.promptAnchorMode, 'anchored', '丙成为"老人"后继�
   assert.ok(!up.includes('【新已读信息】以下是') && !up.includes('【新加入成员】以下是'), '关闭开关 → 无新段');
   assert.ok(up.includes('【记忆】') && up.includes('【已读信息】'), '标准结构仍在');
   // 标准结构滑窗 = 最近 5 条已读（IJKLM）
-  const readSec = up.slice(up.indexOf('【已读信息】以下是'), up.indexOf('【未读信息】以下是'));
+  const readSec = up.slice(up.indexOf('【已读信息】以下是'), up.indexOf('【本轮输入】以下是'));
   assert.ok(['I','J','K','L','M'].every((x) => hasMsg(readSec, x)), '关闭开关 → 滑窗口径');
 }
 

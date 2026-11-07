@@ -850,7 +850,7 @@ export class Orchestrator {
     const messages = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: proactive
-        ? `${userPrompt}\n\n【未读信息】（主动机会）群里已经安静了一会儿。请用 send_message 自然开启话题，不要像播报。`
+        ? `${userPrompt}\n\n【主动机会】群里已经安静了一会儿。请用 send_message 自然开启话题，不要像播报。`
         : userPrompt }
     ];
 

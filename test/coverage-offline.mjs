@@ -1055,10 +1055,10 @@ c.section('13. prompt.js 提示词组装');
       selfNickname: '覆盖机', selfLastMessageAt: Date.now() - 30000, lastMessageAt: Date.now(),
       recentCount: 10, runSeq: 1, moreUnreadDuringRun: false, proactive: false
     });
-    for (const sec of ['【当前时间】', '【未读信息】', '【已读信息】']) {
+    for (const sec of ['【当前时间】', '【本轮输入】', '【已读信息】']) {
       assert.ok(String(up).includes(sec), `用户提示缺少「${sec}」`);
     }
-    assert.ok(String(up).includes('未读消息1'), '应包含未读信息的消息');
+    assert.ok(String(up).includes('未读消息1'), '应包含本轮输入的消息');
   });
 }
 

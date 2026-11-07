@@ -15,9 +15,10 @@ const INJECT_TAG = '【语音触发】';
 /** 跨会话（转达给别人）用另一个标记：闸门要能分辨"当前会话语音"和"转达语音"。 */
 const CROSS_TAG = '【语音转达】';
 
-/** 核心 user prompt 的分段标记（prompt.js:855）。 */
-const UNREAD_MARKER = '【未读信息】';
-const CORE_SECTION_RE = /\n【(?:记忆|已读信息|新已读信息|未读信息|新加入成员|当前时间|角色设定|表情包|引导说明)/;
+/** 核心用户提示的输入段；兼容仍使用旧标题的宿主与旧会话。 */
+const INPUT_HEADING_RE = /(?:^|\n)【本轮输入】以下是[^\n]*\n/u;
+const LEGACY_INPUT_MARKER = '【未读信息】';
+const CORE_SECTION_RE = /\n【(?:记忆|已读信息|新已读信息|本轮输入|未读信息|新加入成员|当前时间|角色设定|表情包|引导说明|主动机会)/;
 
 const DEFAULT_KEYWORDS = '发语音,说语音,语音回复,用语音,念一下,读出来,发个语音,语音说,发条语音,能语音吗,發語音,語音回覆,用語音,讀出嚟,读出嚟,講語音,讲语音,發條語音,讀出來';
 
@@ -208,6 +209,7 @@ export const hooks = {
 };
 
 function injectTrigger(payload) {
+  if (payload?.proactive) return;
   const messages = payload?.messages;
   if (!Array.isArray(messages) || !messages.length) return;
 
@@ -216,7 +218,7 @@ function injectTrigger(payload) {
   if (msg.content.includes(INJECT_TAG) || msg.content.includes(CROSS_TAG)) return;   // 幂等
 
   const s = readSettings();
-  const tail = unreadTail(msg.content);
+  const tail = currentInputTail(msg.content);
   const hit = pickKeyword(tail, s.triggerKeywords);
   if (!hit) return;
   const request = speechRequest(msg.content, s);
@@ -260,10 +262,12 @@ function voiceModeThisTurn(session) {
   return last.content.includes(INJECT_TAG) || last.content.includes(CROSS_TAG);
 }
 
-function unreadTail(content) {
-  const i = content.lastIndexOf(UNREAD_MARKER);
-  if (i < 0) return '';
-  const rest = content.slice(i + UNREAD_MARKER.length);
+function currentInputTail(content) {
+  const heading = INPUT_HEADING_RE.exec(content);
+  const legacyIndex = heading ? -1 : content.lastIndexOf(LEGACY_INPUT_MARKER);
+  if (!heading && legacyIndex < 0) return '';
+  const start = heading ? heading.index + heading[0].length : legacyIndex + LEGACY_INPUT_MARKER.length;
+  const rest = content.slice(start);
   const cut = rest.search(CORE_SECTION_RE);
   return cut >= 0 ? rest.slice(0, cut) : rest;
 }
@@ -292,7 +296,7 @@ function splitKeywords(raw) {
 function speechRequest(content, s) {
   // Only this turn's actual message bodies: exclude history, speaker names,
   // reply blocks, later core sections and our own injected instructions.
-  const tail = unreadTail(String(content ?? '')).split(/\n\n【语音(?:触发|转达)】/u)[0];
+  const tail = currentInputTail(String(content ?? '')).split(/\n\n【语音(?:触发|转达)】/u)[0];
   const entries = tail.split(/(?=^\[\d{2}-\d{2} \d{2}:\d{2}\])/mu).map(entry => entry
     .replace(/^\[\d{2}-\d{2} \d{2}:\d{2}\][^\n]*?：/u, '')
     .replace(/\[引用(?:[^\[\]]|\[[^\[\]]*\])*\]/gu, '')

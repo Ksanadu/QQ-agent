@@ -1,7 +1,7 @@
 // 触发链路语义回归（2026-09-25 重做后的核心承诺）：
 //   1. 逐条判定：不触发的消息入库瞬间标已读（"未读一闪即已读"）；
 //   2. 触发消息保持未读并进入倒计时；同一唤醒者续发刷新，其他人不重置；
-//   3. 倒计时结束后触发批（触发消息 + 窗口内追加的）整体成为【未读信息】，
+//   3. 倒计时结束后触发批（触发消息 + 窗口内追加的）整体成为【本轮输入】，
 //      之前已读的闲聊是【已读信息】——边界恰好落在"触发消息之前"；
 //   4. 4 档下任何消息必触发，聚批/边界语义与 1~3 档完全一致；
 //   5. 暂停期间消息不判定不触发（只积压），恢复后走 drainBacklogAfterResume。
@@ -60,20 +60,20 @@ await check('A2 触发消息（@）：保持未读进倒计时；窗口内其他
   assert.ok(llmCount() >= 1, `倒计时不应被追加消息重置（期望已发起 LLM 请求，实际 ${llmCount()}）`);
 });
 
-await check('A3 边界：已读闲聊进【已读信息】，触发批进【未读信息】', async () => {
+await check('A3 边界：已读闲聊进【已读信息】，触发批进【本轮输入】', async () => {
   await waitFor(() => llmCount() >= 1, 5000, 'LLM 请求到达');
   const req = llm.state.requests[0];
   const userText = String(req.messages[1].content);
   // 用完整段头定位（引导说明正文里也引用了段名，浅匹配会拿到正文行）
   const pastIdx = userText.indexOf('【已读信息】以下是');
-  const wakeIdx = userText.indexOf('【未读信息】以下');
+  const wakeIdx = userText.indexOf('【本轮输入】以下');
   assert.ok(pastIdx >= 0 && wakeIdx > pastIdx, '两个段落都应存在且已读信息在前');
   const pastText = userText.slice(pastIdx, wakeIdx);
   const wakeText = userText.slice(wakeIdx);
   assert.ok(pastText.includes('闲聊一句'), '触发前的已读闲聊应在【已读信息】');
   assert.ok(!pastText.includes('在吗'), '触发消息不应出现在【已读信息】');
-  assert.ok(wakeText.includes('@覆盖Bot 在吗'), '触发消息应在【未读信息】');
-  assert.ok(wakeText.includes('我也插一句闲聊'), '窗口内追加的消息应在【未读信息】');
+  assert.ok(wakeText.includes('@覆盖Bot 在吗'), '触发消息应在【本轮输入】');
+  assert.ok(wakeText.includes('我也插一句闲聊'), '窗口内追加的消息应在【本轮输入】');
 });
 await settle();
 
@@ -84,7 +84,7 @@ await check('B1 4 档：任意消息必触发会话，且同为"触发 + 聚批"
   pushGroupMsg(111, '张三', '随便说点什么', 9101);
   await waitFor(() => llmCount() > before, 5000, '4 档必触发');
   const userText = String(llm.state.requests.at(-1).messages[1].content);
-  assert.ok(userText.includes('随便说点什么'), '触发消息应进【未读信息】');
+  assert.ok(userText.includes('随便说点什么'), '触发消息应进【本轮输入】');
 });
 await settle();
 
@@ -112,11 +112,11 @@ await check('C2 恢复后处理积压（drainBacklogAfterResume）', async () =>
 });
 await settle();
 
-// ── 场景 D：磁盘遗留的旧积压未读不得混进【未读信息】──────────────────────
+// ── 场景 D：磁盘遗留的旧积压未读不得混进【本轮输入】──────────────────────
 // 真实事故（2026-09-25）：旧进程攒的 60+ 条积压未读躺在磁盘上，新进程启动后
 // 第一条 @ 触发时 drain 把它们全部吃进触发批 —— 模型看到一大坨"未读信息"。
 // 修复：批边界 = 倒计时起点；更早的旧积压标已读沉入【已读信息】。
-await check('D1 旧积压（未经 onIncoming 的遗留未读）沉入【已读信息】，不进【未读信息】', async () => {
+await check('D1 旧积压（未经 onIncoming 的遗留未读）沉入【已读信息】，不进【本轮输入】', async () => {
   // 直接往 store 塞积压未读，绕过 onIncoming（模拟旧进程/停机期间遗留）
   const oldTs = Date.now() - 5 * 60_000;
   for (let i = 0; i < 15; i++) {
@@ -133,12 +133,12 @@ await check('D1 旧积压（未经 onIncoming 的遗留未读）沉入【已读�
   await waitFor(() => llmCount() > before, 8000, '触发运行');
   const userText = String(llm.state.requests.at(-1).messages[1].content);
   // 2026-09-25 锚点改版后顺序 = 记忆 → 已读信息 → 未读信息（记忆在已读之前），
-  // 已读段切片的右边界改用【未读信息】；锚定轮还可能在中间多出【新已读信息】段。
-  const pastText = userText.slice(userText.indexOf('【已读信息】以下是'), userText.indexOf('【未读信息】以下'));
-  const wakeText = userText.slice(userText.indexOf('【未读信息】以下'));
+  // 已读段切片的右边界改用【本轮输入】；锚定轮还可能在中间多出【新已读信息】段。
+  const pastText = userText.slice(userText.indexOf('【已读信息】以下是'), userText.indexOf('【本轮输入】以下'));
+  const wakeText = userText.slice(userText.indexOf('【本轮输入】以下'));
   assert.ok(pastText.includes('旧积压闲聊14'), '旧积压应沉入【已读信息】');
-  assert.ok(!wakeText.includes('旧积压'), '旧积压不应混进【未读信息】');
-  assert.ok(wakeText.includes('看看这段历史'), '触发消息应在【未读信息】');
+  assert.ok(!wakeText.includes('旧积压'), '旧积压不应混进【本轮输入】');
+  assert.ok(wakeText.includes('看看这段历史'), '触发消息应在【本轮输入】');
   assert.equal(unread(), 0, '处理完后未读应清零');
 });
 await settle();
@@ -190,9 +190,9 @@ await check('E2 运行期间的 @：会话结束后补判定触发 → 从 @ 消
   const callsAfterE2 = llmCount();
   await waitFor(() => llmCount() > callsAfterE2, 10000, '运行期 @ 应触发');
   const userText = String(llm.state.requests.at(-1).messages[1].content);
-  const wakeText = userText.slice(userText.indexOf('【未读信息】以下'));
-  assert.ok(wakeText.includes('运行期被点名'), '运行期 @ 应进【未读信息】');
-  assert.ok(!wakeText.includes('运行期又一句闲聊'), '@ 之前的闲聊不应进【未读信息】（沉入已读信息）');
+  const wakeText = userText.slice(userText.indexOf('【本轮输入】以下'));
+  assert.ok(wakeText.includes('运行期被点名'), '运行期 @ 应进【本轮输入】');
+  assert.ok(!wakeText.includes('运行期又一句闲聊'), '@ 之前的闲聊不应进【本轮输入】（沉入已读信息）');
 });
 
 await env.teardown();

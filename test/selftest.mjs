@@ -338,7 +338,7 @@ refs:
   assert.strictEqual(req1.messages[0].role, 'system');
   assert.strictEqual(req1.messages[1].role, 'user');
   const user1 = req1.messages[1].content;
-  assert.ok(user1.includes('【未读信息】') && user1.includes('在吗？'), '用户消息含未读信息与触发文本');
+  assert.ok(user1.includes('【本轮输入】') && user1.includes('在吗？'), '用户消息含本轮输入与触发文本');
   assert.ok(user1.includes('【当前时间】') && user1.includes('【已读信息】'), '用户消息含时间与已读信息');
   assert.ok(req1.tools?.some((t) => t.function.name === 'send_message'), 'send_message 工具已暴露');
   const toolNames = req1.tools.map((t) => t.function.name);
@@ -379,7 +379,7 @@ refs:
   await waitFor(() => llm.state.requests.length >= reqsBeforeA + 2, 6000, 'drain 运行开始');
   const drainReq = llm.state.requests.at(-1);
   assert.strictEqual(drainReq.messages.length, 2, 'drain 运行同样是全新会话（零历史）');
-  assert.ok(drainReq.messages[1].content.includes('处理期间插进来的新消息'), 'drain 运行的【未读信息】是处理期间插入的消息');
+  assert.ok(drainReq.messages[1].content.includes('处理期间插进来的新消息'), 'drain 运行的【本轮输入】是处理期间插入的消息');
   assert.ok(!drainReq.messages[1].content.includes('在的"') || drainReq.messages[1].content.includes('我：在的'), '此前发言只以存档形式出现');
   await waitSessionDone('处理期间插进来的新消息');
   pass('drain 循环：运行中新消息 → 结束后自动新开会话处理，每次 messages.length=2');

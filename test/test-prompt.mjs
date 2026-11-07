@@ -70,8 +70,7 @@ for (const banned of ['沉睡前观察', 'qq_wait_for_messages', 'qq_set_wake_co
 
 // ── 2. 用户提示：包含当前实现的真实段落 ──
 // 注意：段落清单必须与 buildUserPrompt 实际产出保持一致。
-// 当前实现产出：【当前时间】【角色设定】【已读信息】【未读信息】【记忆】【可用表情包】【引导说明】
-// （2026-09-25 改版：【此刻状态】删除、【过去状态】→【已读信息】、【本次唤醒】→【未读信息】。）
+// 当前实现产出：【当前时间】【角色设定】【已读信息】【本轮输入】【记忆】【引导说明】
 const store = makeStore();
 const memory = new MemoryStore();
 memory.append('group:123', 'memberImpression', '喜欢猫', { userId: 'u1', target: '群友1' });
@@ -98,30 +97,29 @@ const userPrompt = buildUserPrompt({
   proactive: false
 });
 
-for (const section of ['【当前时间】', '【角色设定', '【已读信息】', '【未读信息】', '【记忆】', '【引导说明】']) {
+for (const section of ['【当前时间】', '【角色设定', '【已读信息】', '【本轮输入】', '【记忆】', '【引导说明】']) {
   assert.ok(userPrompt.includes(section), `用户提示缺少段落：${section}`);
 }
 assert.ok(!userPrompt.includes('【可用表情包】'), '表情目录应按需查询，不常驻上下文');
 assert.ok(!sys.includes('【表情包策略'), '表情用法已移入核心速查');
-for (const banned of ['沉睡前观察', 'qq_', '[SILENT]', '【此刻状态】', '【过去状态】', '【本次唤醒】']) {
+for (const banned of ['沉睡前观察', 'qq_', '[SILENT]', '【此刻状态】', '【过去状态】', '【本次唤醒】', '【未读信息】']) {
   assert.ok(!userPrompt.includes(banned), `用户提示不应包含（已删除/改名段落）：${banned}`);
 }
 
 // ── 2b. 段落顺序 = 变化频率升序（前缀缓存命中）───────────────────────────
-// 稳定段（角色设定/表情包/引导说明/记忆/已读信息）必须排在易变段（未读信息/
+// 稳定段（角色设定/引导说明/记忆/已读信息）必须排在易变段（本轮输入/
 // 当前时间）之前：任何一个易变段插在稳定段前面，都会把后面的全部段落挤出
 // 两次运行间的缓存前缀。
 // 2026-09-25 锚点改版：【记忆】移到【已读信息】之前 —— 连续触发时记忆+已读
 // 构成跨轮不变的字节前缀（锚点），记忆随"锚点成员集"而非"窗口尾部"滚动。
-// 注意用**完整标题行**定位：引导说明正文里也提到了"【已读信息】【未读信息】"
-// 字样，只搜段名会匹配到正文引用。
+// 用完整标题定位，避免匹配引导说明里的段名。
 {
   const header = (mark) => userPrompt.indexOf(mark);
   assert.ok(header('【角色设定（管理员设置') >= 0, '应有角色设定段');
   assert.ok(header('【引导说明】') < header('【记忆】\n'), '引导说明应在记忆之前');
   assert.ok(header('【记忆】\n') < header('【已读信息】以下是这个会话'), '记忆应在已读信息之前（锚点前缀的核心）');
-  assert.ok(header('【已读信息】以下是这个会话') < header('【未读信息】以下是'), '已读信息应在未读信息之前');
-  assert.ok(header('【未读信息】以下是') < header('【当前时间】'), '未读信息应在当前时间之前');
+  assert.ok(header('【已读信息】以下是这个会话') < header('【本轮输入】以下是'), '已读信息应在本轮输入之前');
+  assert.ok(header('【本轮输入】以下是') < header('【当前时间】'), '本轮输入应在当前时间之前');
 }
 
 // ── 3. 触发批不出现在"已读信息"里（避免重复） ──
@@ -152,6 +150,32 @@ const proactivePrompt = buildUserPrompt({
   selfNickname: '测试机', runSeq: 8, moreUnreadDuringRun: false, proactive: true
 });
 assert.ok(proactivePrompt.includes('【已读信息】'), '主动模式也带已读信息');
+assert.ok(!proactivePrompt.includes('【本轮输入】'), '无启动消息时不生成空输入段');
+
+// 语音技能仍只匹配启动输入，历史消息不会触发；旧宿主仍可用。
+{
+  const { hooks } = await import('../skills/tts-say/index.js');
+  const speechPrompt = buildUserPrompt({
+    chatKey: 'group:123', kind: 'group', chatId: '123', store, memory,
+    triggerEntries: [
+      { mid: -123, ts: Date.now(), senderId: 'u1', text: '用语音说' },
+      { ts: Date.now(), senderId: 'u2', text: '拍了拍我' }
+    ]
+  });
+  const body = speechPrompt.slice(speechPrompt.indexOf('【本轮输入】以下是'));
+  assert.match(body, /时间后若有 #数字（可为负数）/);
+  assert.match(body, /#-123 [^\n]+：用语音说/);
+  assert.match(body, /^\[[^\]\n]+\] [^#\n]+：拍了拍我/m);
+  const applySpeech = async (content, proactive = false) => {
+    const messages = [{ role: 'user', content }];
+    await hooks['before-llm-messages']({ messages, proactive });
+    return messages[0].content;
+  };
+  assert.match(await applySpeech(speechPrompt), /【语音触发】/);
+  assert.doesNotMatch(await applySpeech(speechPrompt.replace('用语音说', '继续').replace('【已读信息】', '【已读信息】用语音说')), /【语音触发】/);
+  assert.match(await applySpeech('【未读信息】以下是旧版输入：\n[10-20 10:00] #-123 甲：用语音说'), /【语音触发】/);
+  assert.doesNotMatch(await applySpeech('【已读信息】甲引用了【未读信息】用语音说\n\n【主动机会】', true), /【语音触发】/);
+}
 
 // ── 7. 默认人设 = 原版小鲸鱼角色卡（已适配新架构，不含旧机制指令） ──
 assert.ok(DEFAULT_CONFIG.persona.roleText.includes('DeepSeek 小鲸鱼'), '默认人设为原版小鲸鱼角色卡');

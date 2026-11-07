@@ -72,14 +72,14 @@ plugins/video-frames:        video-frames-note(p35)
 | 4 | 【过去状态】 | buildPastState：最多 contextLimit 条已读历史。过滤：撤回、全局屏蔽、本群屏蔽。每行 `[时间] #id 名字(QQ:号)：[引用...]正文`（带图消息才带 #id；名字优先 memberNotes 备注 > 群名片；QQ 号兜底由核心拼 `(QQ:xxx)`，speaker-identity 开启时走插件可加主人标注） | 逐条滚动 |
 | 5 | 【记忆】 | formatForPrompt：只带"本次真的出现在提示词里的群友"印象（触发者 + 过去状态里的人，每人最近 3 条）——曾写死 recent(12) 与档位脱钩 | 滚动 |
 | 6 | 【此刻状态】 | 群名/私聊、10 分钟消息数、最后消息距今、自己上次发言距今 | 易变 |
-| 7 | 【本次唤醒】 | buildTriggerBlock：触发批消息，每条附标签（@我/提到我/提到我(备注名)/提问/引用/拍一拍，与唤醒判定同口径） | 必变 |
+| 7 | 【本轮输入】 | 会话启动时选入的消息；有 QQ 消息 ID 才显示 #数字。运行中收到的补充另用【本轮新增消息】。 | 必变 |
 | 8 | 【当前时间】 | formatFullTime 精确到秒 | 必变（故放最末） |
 
 构建完把 `pastStateCount` 写回 session，供 get_recent_messages 翻页跳过已看过的消息。
 
 ## 第 6 步：主动机会追加（orchestrator.js:732）
 
-proactive 运行在 user 消息末尾追加「（主动机会）群里已经安静了一会儿。你可以主动抛一个自然的话题，也可以安静结束」。
+proactive 运行在 user 消息末尾追加【主动机会】，提示用 send_message 自然开启话题。
 主动机会无触发批，tier 固定 4 档（allCount 全量历史）。
 
 ## 第 7 步：before-llm-messages 钩子（orchestrator.js:740，原地改 messages）
