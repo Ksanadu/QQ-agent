@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { assertDeliveryAllowed } from './chat-policy.js';
 import { getConfig, DEFAULT_CONFIG } from './config.js';
-import { sleep, randInt, createSendChain, formatClockTime } from './util.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { randInt, createSendChain, formatClockTime } from './util.js';
 import { mdToPlain, splitForQQ } from './md-to-plain.js';
 import { captureReactionTargets, validateMessageReaction } from './message-reactions.js';
 
@@ -66,10 +67,10 @@ export class SendQueue {
 
   forSession(session, emit = () => {}, { reactionMessages = captureReactionTargets({
     triggerEntries: session.trigger, store: this.store, chatKey: session.chatKey
-  }) } = {}) {
+  }), checkCurrent = null, waitBeforeSend = null, beforeSend = null, signal = null } = {}) {
     const sender = { recordsDeliveries: true };
     for (const method of ['sendTextBatch', 'sendSticker', 'sendImage', 'sendMedia', 'poke', 'reactMessage']) {
-      sender[method] = (...args) => this.deliveryContext.run({ session, emit, reactionMessages }, () => this[method](...args));
+      sender[method] = (...args) => this.deliveryContext.run({ session, emit, reactionMessages, checkCurrent, waitBeforeSend, beforeSend, signal }, () => this[method](...args));
     }
     return Object.freeze(sender);
   }
@@ -78,6 +79,19 @@ export class SendQueue {
     const session = this.deliveryContext.getStore()?.session;
     if (session?.status && session.status !== 'running') throw new Error('本轮回复已结束或中止，停止发送');
     assertDeliveryAllowed(chatKey, getConfig(), this.deliveryContext.getStore()?.session.chatKey || '');
+    this.deliveryContext.getStore()?.checkCurrent?.();
+  }
+
+  #deliveryOptions(chatKey, options = {}) {
+    const context = this.deliveryContext.getStore();
+    return {
+      waitBeforeSend: context?.waitBeforeSend,
+      beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); context?.beforeSend?.(); }
+    };
+  }
+
+  #pace(ms) {
+    return delay(ms, undefined, { signal: this.deliveryContext.getStore()?.signal || undefined });
   }
 
   #recordSent(receipt) {
@@ -200,7 +214,7 @@ export class SendQueue {
       promises.push(chain(async () => {
         this.#guard(chatKey);
         this.#checkRate(chatKey);
-        if (gap > 0) await sleep(gap);
+        if (gap > 0) await this.#pace(gap);
         // 发送去重：窗口期内 identical 文本跳过（防模型重复调用/超时重试造成的重复发言）
         if (this.#isDuplicate(chatKey, dedupeText)) {
           console.warn(`[sender] 跳过重复消息（${this.#dedupeWindow()}ms 内已发过相同内容）：${String(text).slice(0, 30)}`);
@@ -211,7 +225,7 @@ export class SendQueue {
         const data = await this.onebot.sendText(kind, id, text, {
           replyToMessageId: i === 0 ? options.replyToMessageId : null, // 引用挂在第一条上：回的就是那条
           atUserId: i === 0 ? options.atUserId : null,
-          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+          ...this.#deliveryOptions(chatKey, options)
         });
         this.#markSent(chatKey, dedupeText);   // 只有 OneBot 成功返回后才记入去重窗口
         const ts = Date.now();
@@ -247,7 +261,7 @@ export class SendQueue {
     return chain(async () => {
       this.#guard(chatKey);
       this.#checkRate(chatKey);
-      await sleep(randInt(600, 1500)); // 发表情前真人式的短暂停顿
+      await this.#pace(randInt(600, 1500)); // 发表情前真人式的短暂停顿
       // ── 发送回退链（修"表情包经常发送失败"）────────────────────────────
       // 表情库里的 url 有三种形态，稳定性天差地别：
       //   1. file:/// 本地转存（收藏功能写入，永久有效）—— 最优先
@@ -260,7 +274,7 @@ export class SendQueue {
         replyToMessageId: options.replyToMessageId ?? null,
         atUserId: options.atUserId ?? null,
         verificationRef: sticker.md5 || null,
-        beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+        ...this.#deliveryOptions(chatKey, options)
       }));
       let data;
       const primary = String(sticker.url || '').trim();
@@ -352,7 +366,7 @@ export class SendQueue {
         throw new Error('这张图刚刚发过，已跳过（避免重复刷屏）');
       }
       this.#checkRate(chatKey);
-      await sleep(randInt(500, 1300));   // 发图前真人式的短暂停顿
+      await this.#pace(randInt(500, 1300));   // 发图前真人式的短暂停顿
 
       let data;
       try {
@@ -362,7 +376,7 @@ export class SendQueue {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null,
           verificationRef: dataUrl || null,
-          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+          ...this.#deliveryOptions(chatKey, options)
         });
       } catch (error) {
         // file:// 失败 → 回退 base64（协议端不同机、路径不可读、权限不足等）。
@@ -374,7 +388,7 @@ export class SendQueue {
         data = await this.onebot.sendImage(kind, id, dataUrl, {
           replyToMessageId: options.replyToMessageId ?? null,
           atUserId: options.atUserId ?? null,
-          beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+          ...this.#deliveryOptions(chatKey, options)
         });
       }
       this.#markSent(chatKey, `__img__${dedupeKey}`);   // 发图同样：成功后才记账
@@ -417,10 +431,10 @@ export class SendQueue {
         throw new Error('这份媒体刚刚发过，已跳过（避免重复刷屏）');
       }
       this.#checkRate(chatKey);
-      await sleep(randInt(800, 1800));   // 视频/多图体积大，停顿比文字长一点
+      await this.#pace(randInt(800, 1800));   // 视频/多图体积大，停顿比文字长一点
       this.#guard(chatKey);
       const data = await this.onebot.sendSegments(kind, id, segs, {
-        beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); }
+        ...this.#deliveryOptions(chatKey, options)
       });
       this.#markSent(chatKey, `__media__${dedupeKey}`);   // 成功后才记账
       const ts = Date.now();
@@ -438,13 +452,13 @@ export class SendQueue {
     return this.#chain(chatKey)(async () => {
       if (session.status && session.status !== 'running') throw new Error('本轮回复已结束或中止，不能再贴表情');
       this.#guard(chatKey);
-      const result = validateMessageReaction({ ...options, targets: context.reactionMessages });
+      const result = validateMessageReaction({ ...options, targets: typeof context.reactionMessages === 'function' ? context.reactionMessages() : context.reactionMessages });
       let states = this.reactionStates.get(session);
       if (!states) { states = new Map(); this.reactionStates.set(session, states); }
       const key = `${result.messageId}:${result.emojiId}`;
       if (states.has(key) && states.get(key) === result.set) return { ...result, duplicate: true };
       this.#checkRate(chatKey);
-      await this.onebot.call('set_msg_emoji_like', { message_id: result.messageId, emoji_id: result.emojiId, set: result.set });
+      await this.onebot.call('set_msg_emoji_like', { message_id: result.messageId, emoji_id: result.emojiId, set: result.set }, null, this.#deliveryOptions(chatKey));
       states.set(key, result.set);
       // 记录表情动作回执，不伪造文字；主会话完结另需 send_message 成功凭据。
       this.#recordSent({ chatKey, kind: 'reaction', messageId: result.messageId,
@@ -461,9 +475,9 @@ export class SendQueue {
       // 拍一拍同样占发送配额 —— 曾经不调 #checkRate，模型连发 poke
       // 可以绕过 maxPerMinute/maxPerHour 刷屏
       this.#checkRate(chatKey);
-      await sleep(randInt(300, 900));
+      await this.#pace(randInt(300, 900));
       this.#guard(chatKey);
-      const data = await this.onebot.sendPoke(kind, id, targetUserId);
+      const data = await this.onebot.sendPoke(kind, id, targetUserId, this.#deliveryOptions(chatKey));
       const ts = Date.now();
       const target = kind === 'group' && targetUserId != null ? ` ${targetUserId}` : '对方';
       this.store.appendSelf(chatKey, { text: `[拍一拍] 你拍了拍${target}`, ts, mid: data?.message_id ?? null });

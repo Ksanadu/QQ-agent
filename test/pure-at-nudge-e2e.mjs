@@ -25,30 +25,25 @@ try {
   console.log('PASS same requester pure @ during a main run is archived as a nudge; no LLM, listener check or second wake');
 
   let start=llm.state.requests.length;
-  llm.state.script[start]={...reply('第二轮答复'),delayMs:1600};
-  llm.state.script[start+1]=reply('处理新增请求');
+  llm.state.script[start]={...reply('不可发送的旧稿'),delayMs:350};
+  llm.state.script[start+1]=reply('按最新请求回答');
   pushGroupMsg(777,'甲','@覆盖Bot 第二问',200);
   await waitFor(()=>llm.state.requests.length===start+1);
   const cases=[
-    [201,777,[at,{type:'text',data:{text:'换一首'}}]],
-    [202,999,[at]],
-    [203,777,[{type:'reply',data:{id:'100'}},at]],
-    [204,777,[at,{type:'image',data:{url:'https://example.com/test.png'}}]],
-    [205,777,[at,{type:'at',data:{qq:'999'}}]],
-    [206,777,[{type:'text',data:{text:'@覆盖Bot'}}]]
+    [201,[at,{type:'text',data:{text:'换一首'}}]],
+    [203,[{type:'reply',data:{id:'100'}},at]],
+    [204,[at,{type:'image',data:{url:'https://example.com/test.png'}}]],
+    [205,[at,{type:'at',data:{qq:'999'}}]],
+    [206,[{type:'text',data:{text:'@覆盖Bot'}}]]
   ];
-  for(const [mid,user,segments]of cases)send(mid,user,segments);
-  await waitFor(()=>app.store.findByMid('group:456',206));
-  for(const [mid]of cases)assert.equal(app.store.findByMid('group:456',mid).read,false);
-  await waitFor(()=>llm.state.requests.length===start+2);await idle();
-  const follow=app.sessions.listSummaries(30).map(s=>app.sessions.get(s.id)).find(s=>s.trigger?.some(m=>m.mid===201));
-  assert.deepEqual(follow.trigger.map(m=>m.mid).sort((a,b)=>a-b),cases.map(c=>c[0]).sort((a,b)=>a-b));
-  console.log('PASS new text, another requester, quote, image, another mention and typed nickname remain queued requests');
-
-  start=llm.state.requests.length;llm.state.script[start]=reply('结束后重新召唤');
-  send(300);await waitFor(()=>llm.state.requests.length===start+1);await idle();
-  assert.equal(app.store.findByMid('group:456',300).nudgeForSessionId,undefined);
-  console.log('PASS pure @ after completion still summons normally');
+  for(const [mid,segments] of cases)send(mid,777,segments);
+  await waitFor(()=>app.store.findByMid('group:456',206)?.read);
+  await idle();
+  const follow=app.sessions.listSummaries(30).map(s=>app.sessions.get(s.id)).find(s=>s.trigger?.some(m=>m.mid===200));
+  assert.deepEqual(follow.trigger.map(m=>m.mid),[200,...cases.map(c=>c[0])]);
+  assert.deepEqual(follow.sent.map(m=>m.text),['按最新请求回答']);
+  assert.equal(llm.state.requests.length,start+2);
+  console.log('PASS same speaker substantive @/quote/media go into the active run, not the nudge or new wake path');
 
   start=llm.state.requests.length;llm.state.script[start]={...reply('不应发出'),delayMs:1600};
   pushGroupMsg(777,'甲','@覆盖Bot 中止测试',400);

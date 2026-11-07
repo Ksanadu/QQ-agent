@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { bootApp, waitFor } from './_harness.mjs';
 const env = await bootApp({ config: { wakeDelayMs: 30 }, script: [
   { toolCalls: [{ name: 'search_chat_history', args: { query: '旧推荐' } }, { name: 'set_task_context', args: { summary: '依次比较两张照片', messageIds: [-11, -12] } }] },
-  { toolCalls: [{ name: 'finish', args: { reason: '保存完成' } }] },
-  { toolCalls: [{ name: 'finish', args: { reason: '继续第二张' } }] }
+  { toolCalls: [{ name: 'send_message', args: { messages: '已保存' } }, { name: 'finish', args: { summary: '保存完成' } }] },
+  { toolCalls: [{ name: 'send_message', args: { messages: '继续第二张' } }, { name: 'finish', args: { summary: '已继续' } }] }
 ] });
 try {
   const { app, pushGroupMsg, llm } = env;

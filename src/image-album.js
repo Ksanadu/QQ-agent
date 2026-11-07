@@ -11,7 +11,7 @@ export class ImageAlbum {
     try { this.items = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8')); } catch { this.items = []; }
     if (!Array.isArray(this.items)) this.items = [];
   }
-  async collect(chatKey, source, { imageIndex = 1, title = '', tags = [] } = {}) {
+  async collect(chatKey, source, { imageIndex = 1, title = '', tags = [], beforeSave = null } = {}) {
     const work = this.chain.then(async () => {
       if (source.recalled) throw new Error('该图片消息已撤回');
       const images = (source.media || []).filter(x => x.kind === 'image' && x.url);
@@ -28,6 +28,7 @@ export class ImageAlbum {
         const hash = createHash('sha256').update(buffer).digest('hex');
         let item = this.items.find(x => x.chatKey === chatKey && x.sha256 === hash);
         const duplicate = Boolean(item);
+        beforeSave?.();
         if (!item) {
           const id = randomUUID(), file = id + type.ext;
           fs.renameSync(tmp, path.join(this.dir, file));

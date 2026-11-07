@@ -843,7 +843,7 @@ return `
       body: `
       <div class="field-row">
         <div class="field"><label>温度</label><input type="number" id="sc-temperature" step="0.1" min="0" max="2" value="${esc(c.api?.temperature ?? 0.8)}" /></div>
-        <div class="field"><label>单次运行最大工具轮数</label><input type="number" id="sc-maxrounds" min="1" max="40" value="${esc(c.api?.maxRounds ?? 12)}" /></div>
+        <div class="field"><label>单次运行最大工具轮数</label><input type="number" id="sc-maxrounds" min="1" max="40" value="${esc(c.api?.maxRounds ?? 12)}" /><div class="hint">一轮中至少有一次工具调用成功才计入；连续失败会停止重试。</div></div>
       </div>
       <div class="field"><label>思考强度</label>
         <select id="sc-thinking-effort">
@@ -868,7 +868,7 @@ return `
         </select>
         <div class="hint">设置模型的思考强度。</div></div>
       <div class="field-row">
-        <div class="field"><label>防抖聚批窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">等待期间，唤醒者的新消息重新计时，其他人的消息不延长窗口。</div></div>
+        <div class="field"><label>回复等待窗口（毫秒）</label><input type="number" id="sc-wakedelay" min="0" value="${esc(c.wakeDelayMs)}" /><div class="hint">收到唤醒者的新消息后，至少等待此时长再发送；期间可提前思考。</div></div>
         <div class="field"><label>批次间隔（毫秒）</label><input type="number" id="sc-draindelay" min="0" value="${esc(c.drainDelayMs)}" /></div>
       </div>
       <div class="field-row">
@@ -900,11 +900,11 @@ return `
         <input type="number" id="cfg-listener-batch-ms" min="0" max="60000" step="100" value="${esc(c.conversationListener?.batchDelayMs ?? 400)}" />
         <div class="hint">默认 400ms，范围 0～60000ms。收集新消息后交给 LLM 判断；窗口内新消息不会重新计时。</div>
       </div>
-      <div class="field"><label for="cfg-listener-wake-ms">判定后延迟唤醒（毫秒）</label>
+      <div class="field"><label for="cfg-listener-wake-ms">判定后回复等待（毫秒）</label>
         <input type="number" id="cfg-listener-wake-ms" min="0" max="60000" step="100" value="${esc(c.conversationListener?.wakeDelayMs ?? 200)}" />
-        <div class="hint">默认 200ms，范围 0～60000ms。判定相关后等待主会话；本次判定的唤醒者续发消息会重新计时，其他人的消息不延长窗口。</div>
+        <div class="hint">默认 200ms，范围 0～60000ms。判定相关后主会话立即开始思考，发送前等待。唤醒者续发会重新计时。</div>
       </div>
-      <div class="hint">自动保存。监听时长和判定前聚批对新监听生效；判定后延迟对新等待窗口生效。</div>`
+      <div class="hint">自动保存。监听时长和判定前聚批对新监听生效；判定后回复等待对新主会话生效。</div>`
     })}
 
     ${fold({

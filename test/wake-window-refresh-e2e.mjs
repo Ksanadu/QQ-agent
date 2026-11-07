@@ -1,51 +1,48 @@
 import assert from 'node:assert/strict';
-import {bootApp, waitFor, sleep} from './_harness.mjs';
-const reply = text => ({toolCalls:[{name:'send_message',args:{messages:text}},{name:'finish',args:{summary:'已回复'}}]});
-const env = await bootApp({config:{wakeDelayMs:800, drainDelayMs:200, conversationListener:{enabled:false}, store:{contextSliderPos:0}},script:[reply('聚批完成')]});
-const {app,pushGroupMsg,llm,request}=env, key='group:456';
-const waiting=()=>app.orchestrator.pendingSessions.get(key);
-const deadline=id=>app.sessions.get(id).waitUntil;
-const arrived=mid=>waitFor(()=>app.store.findByMid(key,mid));
+import { bootApp, waitFor, sleep } from './_harness.mjs';
+const reply = messages => ({ toolCalls: [
+  { name: 'send_message', args: { messages } }, { name: 'finish', args: { summary: '已回复' } }
+] });
+const env = await bootApp({ config: {
+  wakeDelayMs: 1500, drainDelayMs: 200, store: { contextSliderPos: 0 },
+  conversationListener: { enabled: true, idleMs: 15000, batchDelayMs: 700, wakeDelayMs: 550 }
+}, script: [reply('你还想比较什么？')] });
+const { app, pushGroupMsg, llm, waitSessionDone } = env;
+const key = 'group:456';
+const arrived = mid => waitFor(() => app.store.findByMid(key, mid));
+const active = () => app.orchestrator.activeRuns.get(key);
 try {
-  pushGroupMsg(777,'甲','@覆盖Bot 评价一下',801);
-  await waitFor(waiting);const id=waiting(),original=deadline(id);
-  await sleep(220);pushGroupMsg(999,'乙','@覆盖Bot 我也插一句',802);await arrived(802);
-  assert.equal(deadline(id),original,'another sender, even with @, must not reset or replace the owner');
-  await sleep(220);pushGroupMsg(777,'甲','补充这张图',803,{message:[{type:'text',data:{text:'补充这张图'}},{type:'image',data:{url:'https://example.com/a.png'}}]});await arrived(803);
-  assert.equal(waiting(),id);const refreshed=deadline(id);assert.ok(refreshed>original+350);
-  await sleep(Math.max(0,original-Date.now()+80));assert.equal(llm.state.requests.length,0,'old timer must be cancelled');
-  await waitFor(()=>env.onebotHttp.state.sends.length===1);await waitFor(()=>!app.orchestrator.runningChats.size);
-  assert.deepEqual(app.sessions.get(id).trigger.map(m=>m.mid),[801,802,803]);
-  assert.equal(app.orchestrator.wakeWindows.size,0);
-  console.log('PASS normal wake: owner image/text resets, other @ does not, one waiting session and one complete batch');
-
-  pushGroupMsg(777,'甲','@覆盖Bot 取消测试',804);await waitFor(waiting);const cancelled=waiting();
-  pushGroupMsg(777,'甲','再补充',805);await arrived(805);
-  await request('POST',`/api/sessions/${cancelled}/abort`,{body:{}});
-  assert.equal(app.orchestrator.wakeWindows.size,0);assert.equal(app.orchestrator.wakeTimers.size,0);
-  await sleep(900);assert.equal(llm.state.requests.length,1);
-
-  await request('POST','/api/config',{body:{wakeDelayMs:30,conversationListener:{enabled:true,idleMs:15000,batchDelayMs:1000,wakeDelayMs:1200}}});
-  llm.state.script[1]=reply('你还想比较什么？');
   pushGroupMsg(777,'甲','@覆盖Bot 开启监听',810);
-  await waitFor(()=>env.onebotHttp.state.sends.length===2);await waitFor(()=>!app.orchestrator.runningChats.size);
-  pushGroupMsg(777,'甲','那光线呢',811);const entry=await arrived(811);
-  llm.state.script[2]={content:JSON.stringify({related:true,ids:[entry.id],reason:'承接机器人问题'})};
-  await sleep(450);pushGroupMsg(999,'乙','无关闲聊',812);await arrived(812);
-  await sleep(200);assert.equal(llm.state.requests.length,2,'configured 1000ms pre-batch must replace the old 400ms');
-  await waitFor(waiting,1800);const follow=waiting(),firstDeadline=deadline(follow);
-  assert.ok(firstDeadline-Date.now()>1000,'configured 1200ms post-delay replaces 200ms');
-  const firstCheck=JSON.parse(llm.state.requests[2].messages[1].content);
-  assert.deepEqual(firstCheck.newMessages.map(m=>m.id),[entry.id,app.store.findByMid(key,812).id]);
-  llm.state.script[3]={content:JSON.stringify({related:false,ids:[],reason:'不额外触发'})};
-  llm.state.script[4]=reply('补充的光线要求已收到');
-  await sleep(200);pushGroupMsg(999,'乙','路过',813);await arrived(813);assert.equal(deadline(follow),firstDeadline);
-  await sleep(250);pushGroupMsg(777,'甲','也比较阴影',814);await arrived(814);
-  assert.equal(waiting(),follow);const renewed=deadline(follow);assert.ok(renewed>firstDeadline+350);
-  pushGroupMsg(999,'乙','继续路过',815);await arrived(815);assert.equal(deadline(follow),renewed);
-  await sleep(Math.max(0,firstDeadline-Date.now()+60));assert.equal(env.onebotHttp.state.sends.length,2,'related sender extension cancels original post-judgment timer');
-  await waitFor(()=>env.onebotHttp.state.sends.length===3,3500);await waitFor(()=>!app.orchestrator.runningChats.size);
-  const session=app.sessions.get(follow);assert.equal(session.followUpFromListener,true);
-  assert.ok(session.trigger.some(m=>m.mid===814));assert.equal(llm.state.requests.length,5);
-  console.log('PASS real listener worker: configured pre-batch, selected owner post-delay refresh, other sender no reset, one follow-up');
-} finally {await env.teardown();}
+  await waitSessionDone('开启监听');
+  pushGroupMsg(777,'甲','那光线呢',811);
+  const entry = await arrived(811);
+  llm.state.script[1] = { content: JSON.stringify({ related: true, ids: [entry.id], reason: '承接机器人问题' }) };
+  llm.state.script[2] = reply('第一份分析不应发出');
+  llm.state.script[3] = reply('补充的光线和阴影要求已收到');
+  await sleep(230);
+  pushGroupMsg(999,'乙','不相关旁话',812); await arrived(812);
+  await sleep(200);
+  assert.equal(llm.state.requests.length, 1, 'classifier still batches before deciding');
+  await waitFor(() => llm.state.requests.length >= 3);
+  const follow = active();
+  assert.ok(follow);
+  const win = app.orchestrator.replyWindows.get(key), deadline = win.deadline;
+  assert.ok(Date.now() < deadline, 'main LLM starts immediately after classification, before post-judgment deadline');
+  assert.equal(win.delayMs, 550, 'listener uses its configured delay, not the 1500ms main delay');
+  assert.equal(env.onebotHttp.state.sends.length, 1);
+  assert.deepEqual(JSON.parse(llm.state.requests[1].messages[1].content).newMessages.map(m => m.id),
+    [entry.id, app.store.findByMid(key,812).id]);
+  assert.deepEqual([...win.actors], ['777']);
+  pushGroupMsg(777,'甲','也比较阴影',814); await arrived(814);
+  assert.equal(active(), follow);
+  const renewed = win.deadline;
+  assert.ok(renewed > deadline);
+  const finished = await waitSessionDone('那光线呢');
+  assert.equal(finished.id, follow); assert.equal(finished.followUpFromListener, true);
+  assert.deepEqual(finished.trigger.map(m => m.mid), [811,814]);
+  assert.deepEqual(finished.sent.map(m => m.text), ['补充的光线和阴影要求已收到']);
+  assert.ok(finished.sent[0].sentAt >= renewed);
+  assert.ok(finished.sent[0].sentAt < renewed + 800, 'no second full reply window');
+  assert.equal(llm.state.requests.length, 4);
+  console.log('PASS listener preserves pre-batch, starts main model before configured post-judgment window, merges only approved owner');
+} finally { await env.teardown(); }

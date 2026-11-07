@@ -85,7 +85,7 @@ export function setup(api) {
   config = api.config; log = api.log; requestFetch = api.fetch;
   service = new ImageCommandService({ stateFile: path.join(cacheDir, 'quota.json'), preparePrompt, generateImage, saveImage, log });
   api.registerTool({
-    id: 'status', name: '生图状态', category: 'media', icon: '🎨',
+    id: 'status', readOnly: true, name: '生图状态', category: 'media', icon: '🎨',
     description: '只查询 /generate 生图队列状态，不生成图片。用户可同条附图，或引用图片后发送 /generate 图片要求。',
     parameters: { type: 'object', properties: {} },
     execute: async () => ({ content: JSON.stringify(service.status()) })

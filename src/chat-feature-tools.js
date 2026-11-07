@@ -19,17 +19,17 @@ export function registerChatFeatureTools() {
     parameters: { type: 'object', properties: { messageId: { type: ['integer','string'] }, imageIndex: { type: 'integer' }, title: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, required: ['messageId','title','tags'] },
     async execute(ctx, args) { try {
       const m = findMessageWithReply(ctx, args.messageId); if (!m || m.recalled) throw new Error('当前会话找不到该图片消息');
-      return ok(await ctx.imageAlbum.collect(ctx.chatKey, m, args));
+      return ok(await ctx.imageAlbum.collect(ctx.chatKey, m, { ...args, beforeSave: ctx.assertEffectAllowed }));
     } catch (e) { return fail(e); } }
   });
   registerTool({
-    id: 'search_saved_images', name: '搜索收藏图片', category: 'query',
+    id: 'search_saved_images', readOnly: true, name: '搜索收藏图片', category: 'query',
     description: '按名称和内容标签搜索当前会话的收藏图库；空关键词列出最近收藏。聊天历史图片请用 search_chat_history(imagesOnly=true)，图库尚未收藏的图片不会在这里出现。',
     parameters: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer' } }, required: ['query'] },
     async execute(ctx, args) { try { return ok(ctx.imageAlbum.search(ctx.chatKey, args.query, args.limit)); } catch (e) { return fail(e); } }
   });
   registerTool({
-    id: 'get_saved_image', name: '查看收藏图片', category: 'query', requiresVision: true,
+    id: 'get_saved_image', readOnly: true, name: '查看收藏图片', category: 'query', requiresVision: true,
     description: '查看图库中一张图片，id 从 search_saved_images 获取。QQ 大图优先看已缓存的中等压缩图。',
     parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     async execute(ctx, args) { try {
@@ -50,7 +50,7 @@ export function registerChatFeatureTools() {
     } catch (e) { return fail(e); } }
   });
   registerTool({
-    id: 'transcribe_voice_message', name: 'QQ语音转文字', category: 'query',
+    id: 'transcribe_voice_message', readOnly: true, name: 'QQ语音转文字', category: 'query',
     description: '用 QQ 自带语音识别读取当前会话某条语音。新语音会自动转写；历史语音未识别时可按实际消息 ID 重试，不能猜内容。',
     parameters: { type: 'object', properties: { messageId: { type: ['integer','string'] } }, required: ['messageId'] },
     async execute(ctx, args) { try {
@@ -60,7 +60,7 @@ export function registerChatFeatureTools() {
     } catch (e) { return fail(e); } }
   });
   registerTool({
-    id: 'search_chat_history', name: '搜索历史聊天', category: 'query',
+    id: 'search_chat_history', readOnly: true, name: '搜索历史聊天', category: 'query',
     description: '搜索当前会话所有保留的历史记录，不限提示词窗口。可组合关键词（空格分隔且全部命中）、发送者 QQ/昵称、北京时间日期。返回真实消息 ID，可用 get_message_detail / get_message_images 深入读取；不要编造未找到的原话。',
     parameters: { type: 'object', properties: {
       query: { type: 'string' }, sender: { type: 'string', description: 'QQ号/昵称，机器人自己填 self' },

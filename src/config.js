@@ -208,7 +208,7 @@ export const DEFAULT_CONFIG = {
   deny: { groups: [], private: [] },
   allowAllWhenEmpty: false,
   // 运行节奏
-  wakeDelayMs: 2000,        // 空闲时收到消息到发起运行的防抖窗口（等连发聚成一批）
+  wakeDelayMs: 2000,        // 唤醒者最后一条消息到允许发送的窗口
   drainDelayMs: 1200,       // 一次运行结束后发现还有未读，到下一次运行的间隔
   maxConcurrentRuns: 2,     // 全局同时进行的 agent 运行数
   // 会话级自动重试：整轮运行失败且一条消息都没发出时，自动从头再来几次。

@@ -175,7 +175,7 @@ export function setup(a) {
 
   // ① 盘点家底
   api.registerTool({
-    id: 'audit',
+    id: 'audit', readOnly: true,
     name: '盘点表情库',
     description: '查清表情库的家底：总共多少张、哪些没备注、哪些是重复的、哪些没用过、按用途分了几类。想整理表情库、或用户问"你表情库里都有什么/有多少张"时先用它。返回里带现成的清单文字，直接照着告诉用户即可，不要自己另算。',
     category: 'sticker',
@@ -356,7 +356,8 @@ export function setup(a) {
             continue;
           }
           try {
-            await ctx.onebot.call('delete_custom_face', { emoji_id: String(entry.emojiId) });
+            ctx.assertEffectAllowed?.();
+            await ctx.onebot.call('delete_custom_face', { emoji_id: String(entry.emojiId) }, null, { beforeSend: ctx.assertEffectAllowed });
             deletedThisRun.add(String(entry.id));
             ctx.stickers.entries = (ctx.stickers.entries || entries).filter((e) => e.id !== entry.id && String(e.emojiId) !== String(entry.emojiId));
             results.push({ id: entry.id, deleted: true });

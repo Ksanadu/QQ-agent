@@ -46,7 +46,7 @@ try {
       sender: {user_id: 888}, message: [{type: 'text', data: {text: '错误消息 ID'}}]};
     throw Error('missing message');
   };
-  const quote = (id, mid, text, cq = false) => pushGroupMsg(111, '提问者', '', mid, {
+  const quote = (id, mid, text, cq = false, actor = 111) => pushGroupMsg(actor, '提问者', '', mid, {
     message: cq ? `[CQ:reply,id=${id}]${text}` : [
       {type: 'reply', data: {id: String(id)}}, {type: 'text', data: {text}}
     ]
@@ -93,10 +93,12 @@ try {
   console.log('✓ command mute retains tier-1 direct quote summons, matching @ semantics');
 
   const beforeDrain = llm.state.requests.length;
-  llm.state.script[beforeDrain] = {content: '稍等', delayMs: 600};
+  const answer = messages => ({ toolCalls: [{name:'send_message', args:{messages}}, {name:'finish', args:{summary:'完成'}}] });
+  llm.state.script[beforeDrain] = {...answer('先答原请求'), delayMs: 600};
+  llm.state.script[beforeDrain + 1] = answer('另答准确引用');
   pushGroupMsg(111, '提问者', '@覆盖Bot 运行中测试', 709);
   await waitFor(() => llm.state.requests.length > beforeDrain, 3000);
-  quote(-120, 710, '运行中到达的准确引用');
+  quote(-120, 710, '另一位群友的准确引用', false, 999);
   await waitFor(() => app.store.findByMid('group:456', 710), 2000);
   const drained = await waitQuoteDone(710);
   assert.equal(drained.contextReason, '引用机器人消息');

@@ -268,7 +268,8 @@ export class OneBotClient {
     const proof = delivery.message ? { ...params, message: delivery.message } : params;
     const attempt = await this.deliveryVerifier.prepare(action, proof, this.selfId,
       (name, args, limit) => this.#callHttp(name, args, limit));
-    delivery.beforeSend?.(); // Recheck cancellation/permissions after the async snapshot.
+    if (delivery.waitBeforeSend) await delivery.waitBeforeSend();
+    delivery.beforeSend?.(); // Recheck cancellation, permissions and version after the async snapshot.
     try {
       return await this.#callHttp(action, params, timeoutMs);
     } catch (error) {
@@ -361,18 +362,18 @@ export class OneBotClient {
     return segments;
   }
 
-  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null } = {}) {
+  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null, waitBeforeSend = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'text', data: { text: escapeCqText(String(text ?? '')) } });
-    return this.sendSegments(kind, id, segments, { beforeSend });
+    return this.sendSegments(kind, id, segments, { beforeSend, waitBeforeSend });
   }
 
-  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null } = {}) {
+  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     // subType=1 请求协议端按"表情样式"渲染（小图气泡）；不支持该字段的实现会忽略它。
     segments.push({ type: 'image', data: { file: String(imageUrl), subType: 1 } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend });
   }
 
   /**
@@ -386,22 +387,24 @@ export class OneBotClient {
    * 段结构与 sendSticker 完全一样（都是 image 段），区别只是语义：
    * 那个是"发表情"，这个是"发一张图"。所以复用同一套 reply/at 处理。
    */
-  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null } = {}) {
+  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null } = {}) {
     const ref = String(fileRef ?? '').trim();
     if (!ref) throw new Error('图片内容为空');
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'image', data: { file: ref } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend });
   }
 
-  async sendPoke(kind, id, targetUserId) {
-    if (kind === 'private') {
-      return this.call('friend_poke', { user_id: Number(id) }).catch(() =>
-        this.call('send_poke', { user_id: Number(id) }));
+  async sendPoke(kind, id, targetUserId, { beforeSend = null, waitBeforeSend = null } = {}) {
+    const params = kind === 'private' ? { user_id: Number(id) } :
+      { group_id: Number(id), user_id: Number(targetUserId || id) };
+    try {
+      return await this.call(kind === 'private' ? 'friend_poke' : 'group_poke', params, null, { beforeSend, waitBeforeSend });
+    } catch {
+      // The fallback must recheck the session/version too.
+      return this.call('send_poke', params, null, { beforeSend, waitBeforeSend });
     }
-    return this.call('group_poke', { group_id: Number(id), user_id: Number(targetUserId || id) }).catch(() =>
-      this.call('send_poke', { group_id: Number(id), user_id: Number(targetUserId || id) }));
   }
 
   async getMsg(messageId) {

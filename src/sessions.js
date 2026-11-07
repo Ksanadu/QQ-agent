@@ -331,6 +331,13 @@ export class SessionRegistry {
     return s ?? null;
   }
 
+  linkListener(parentId, listenerId) {
+    const parent = this.get(parentId);
+    if (!parent || this.current.has(parentId)) return;
+    parent.listenerSessionId = listenerId;
+    this.#persist(parent);
+  }
+
   /** 设置运行中的活动状态（思考/调用工具）并广播。 */
   setActivity(id, activity) {
     const s = this.current.get(id);

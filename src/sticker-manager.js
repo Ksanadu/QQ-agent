@@ -245,7 +245,7 @@ export class StickerManager {
    * → 备注回写 → 定可发地址。QQ 入库失败不阻断本地收藏，但会在返回里如实
    * 标注（qqCollectError）。
    */
-  async collect(messageId, { url, note = '', file = '' } = {}) {
+  async collect(messageId, { url, note = '', file = '', beforeSave = null } = {}) {
     if (!getConfig().sticker?.collectEnabled) throw new Error('收藏表情功能未开启');
     // 限频
     const now = Date.now();
@@ -263,6 +263,7 @@ export class StickerManager {
     // ① 图片字节：协议端缓存优先（get_image），其次直链下载
     let bytes = null;
     try { bytes = await this.#getImageBytes({ url, file }); } catch { bytes = null; }
+    beforeSave?.();
     // ② 本地转存（双保险，发送最稳的形态）
     let localFile = '';
     if (bytes) {
@@ -276,7 +277,7 @@ export class StickerManager {
     if (!emojiId) {
       try {
         const addRef = bytes ? `base64://${bytes.toString('base64')}` : url;
-        const ret = await this.onebot.call('add_custom_face', { file: addRef });
+        const ret = await this.onebot.call('add_custom_face', { file: addRef }, null, { beforeSend: beforeSave });
         emojiId = String(ret?.emoji_id ?? '').trim();
         if (!emojiId) throw new Error('add_custom_face 未返回 emoji_id');
       } catch (error) {
@@ -286,7 +287,7 @@ export class StickerManager {
 
     // ④ 备注写进 QQ 收藏（best-effort，QQ 面板里能看到这条备注）
     if (emojiId && noteText) {
-      try { await this.onebot.call('modify_custom_face', { emoji_id: emojiId, desc: noteText.slice(0, 20) }); }
+      try { await this.onebot.call('modify_custom_face', { emoji_id: emojiId, desc: noteText.slice(0, 20) }, null, { beforeSend: beforeSave }); }
       catch { /* 备注失败不影响收藏 */ }
     }
 

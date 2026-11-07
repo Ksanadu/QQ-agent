@@ -86,11 +86,26 @@ try{
   assert.equal(exhausted.session.completion.recoveryUsed,true);
   console.log('✓ normal budget exhaustion reserves exactly one send_message-only opportunity');
 
-  const stubborn=await run(105,'不发文字不得假完成',[react(105),finish,finish,react(105)]);
+  const stubborn=await run(105,'不发文字不得假完成',[react(105),finish,finish,finish,react(105)]);
   assert.equal(stubborn.session.status,'error');assert.equal(stubborn.session.completion.delivered,false);
-  assert.equal(stubborn.requests.length,4);assert.match(stubborn.session.error,/任务未完成/);
+  assert.equal(stubborn.requests.length,5);assert.match(stubborn.session.error,/任务未完成/);
+  assert.equal(stubborn.session.toolRoundsUsed,1,'three failed rounds and restricted recovery do not consume the quota');
   assert.equal(stubborn.session.sent.length,1,'final restricted round must not execute a forbidden reaction');
   console.log('✓ persistent refusal is bounded and recorded as error, not done; restricted tool calls cannot execute');
+
+  await request('POST','/api/config',{body:{api:{maxRounds:1}}});
+  const freeFailure=await run(117,'失败和混合批次的额度',[
+    {toolCalls:[{name:'no_such_tool',args:{}}, {name:'another_unknown_tool',args:{}}]},
+    {toolCalls:[{name:'get_recent_messages',args:{limit:1}}, {name:'no_such_tool',args:{}}]},
+    send('失败没有吃掉额度。')
+  ]);
+  assert.equal(freeFailure.session.status,'done');
+  assert.equal(freeFailure.requests.length,3);
+  assert.ok(freeFailure.requests[1].tools.some(t=>t.function.name==='get_recent_messages'));
+  assert.deepEqual(freeFailure.requests[2].tools.map(t=>t.function.name),['send_message']);
+  assert.equal(freeFailure.session.toolRoundsUsed,1);
+  console.log('✓ all-failed rounds are free; a mixed round consumes only one round');
+  await request('POST','/api/config',{body:{api:{maxRounds:3}}});
 
   failText=true;
   const failed=await run(106,'失败发送不算完成',[send('失败的消息'),finish,finish,send('仍然失败')]);

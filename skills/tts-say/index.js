@@ -134,7 +134,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'list_voices',
+    id: 'list_voices', readOnly: true,
     name: '列出可用音色',
     description:
       '列出当前本地引擎的可用音色真名，不访问在线音色服务。'

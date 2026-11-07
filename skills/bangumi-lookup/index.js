@@ -554,7 +554,7 @@ export function setup(api) {
 
   /* 1) 搜作品 / 角色 / 人物 ------------------------------------------------ */
   api.registerTool({
-    id: 'search',
+    id: 'search', readOnly: true,
     name: '搜番剧/角色/人物',
     description: '在 Bangumi（bgm.tv）里搜索动画、漫画、轻小说、游戏、音乐等作品条目，也可以搜角色或声优/制作人。群友提到某个番、某个角色、某个声优时，先用它拿到 **id**，需要详情再调详情工具。参数 keyword 填作品名或人名（中日文都行；越接近官方名越准，「芙莉莲」比「那个精灵魔法师番」准得多）。',
     category: 'web',
@@ -634,7 +634,7 @@ export function setup(api) {
 
   /* 2) 详情 ---------------------------------------------------------------- */
   api.registerTool({
-    id: 'detail',
+    id: 'detail', readOnly: true,
     name: '番剧/角色详情',
     description: '按 id 查 Bangumi 的详细资料。kind=subject：简介、评分排名、集数、放送日期、标签、收藏数，并附**主要制作阵容**；把 characters 打开还能拿到**登场角色与声优**（问「声优是谁」时才开，会多一次请求）。kind=character / person：角色或声优·制作人的资料。id 必须来自「搜番剧/角色/人物」工具，不要自己编。',
     category: 'web',
@@ -705,7 +705,7 @@ export function setup(api) {
 
   /* 3) 剧集与更新进度 ------------------------------------------------------ */
   api.registerTool({
-    id: 'episodes',
+    id: 'episodes', readOnly: true,
     name: '剧集与更新进度',
     description: '列出某部番的剧集和各自播出日期，并**自动算出已经播到第几集**（这个减法已由工具做好，直接照抄，别自己算日期）。群友问「更新到哪了」「这周更没更」「还剩几集完结」时用。subjectId 必须来自搜索工具。',
     category: 'web',
@@ -766,7 +766,7 @@ export function setup(api) {
 
   /* 4) 放送表 ------------------------------------------------------------- */
   api.registerTool({
-    id: 'calendar',
+    id: 'calendar', readOnly: true,
     name: '今日/本周放送表',
     description: 'Bangumi 的每日放送表：某一天更新哪些番。群友问「今天有什么番更新」「这季有什么新番」「周三更什么」时用。weekday 默认 today，也可以填 0~6（0=周一，6=周日）或「周三」这种说法。',
     category: 'web',

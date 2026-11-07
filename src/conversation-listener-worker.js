@@ -47,7 +47,6 @@ async function check() {
 parentPort.on('message', event => {
   if (closed) return;
   if (event.type === 'stop') return close('监听已取消');
-  if (event.type === 'anchor') { anchor = event.anchor; return; }
   if (event.type === 'entry') {
     if (!queue.some(m => m.id === event.entry.id)) queue.push(event.entry);
     queue = queue.slice(-60);

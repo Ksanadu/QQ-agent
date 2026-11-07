@@ -162,7 +162,7 @@ function loadPluginTools() {
 /** 注册所有内置工具到 registry。 */
 function registerAllTools() {
   registerTool({
-    id: 'read_skill_guide', name: '读取技能速查文档', category: 'query', icon: '📖',
+    id: 'read_skill_guide', readOnly: true, name: '读取技能速查文档', category: 'query', icon: '📖',
     description: '按索引读取核心或技能速查文档，使用前先读，同次运行可复用。仅允许列出的核心 ID 或当前启用技能 ID，不接受文件路径。',
     parameters: { type: 'object', properties: { skillId: { type: 'string', description: '技能索引中的 skillId' } }, required: ['skillId'], additionalProperties: false },
     execute: (ctx, args) => {
@@ -324,7 +324,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'list_stickers',
+    id: 'list_stickers', readOnly: true,
     name: '查看表情库',
     description: '查看/搜索你的 QQ 收藏表情（含备注和你的本地笔记）。',
     category: 'sticker',
@@ -347,7 +347,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_sticker_image',
+    id: 'get_sticker_image', readOnly: true,
     name: '查看表情图片',
     description: '查看一个没有备注/不确定含义的表情的图片（视觉模型可直接"看懂"）。',
     category: 'sticker',
@@ -433,7 +433,8 @@ function registerAllTools() {
         const saved = await ctx.stickers.collect(args.messageId, {
           url: imageMedia.url || '',
           file: imageMedia.file || '',
-          note: String(args.note ?? '')
+          note: String(args.note ?? ''),
+          beforeSave: ctx.assertEffectAllowed
         });
         return ok({
           collected: true,
@@ -510,7 +511,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_recent_messages',
+    id: 'get_recent_messages', readOnly: true,
     name: '查看历史消息',
     description: '往前翻当前会话的更多历史消息（提示词里只带了最近一段；需要更早的上下文时用）。返回带 messageId（就是聊天记录里的 #数字），可用于引用或看图。消息文本出现 [合并转发聊天记录] 时，用 read_forward 展开看内容。',
     category: 'query',
@@ -542,7 +543,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'read_forward',
+    id: 'read_forward', readOnly: true,
     name: '展开转发消息',
     description: '展开查看合并转发的聊天记录。消息文本出现 [合并转发聊天记录] 或 [转发消息 …] 占位符时用。参数填当前会话那条转发消息前的 #数字（可为负数），程序会自动解析转发资源 ID，不要自行传长资源 ID。展开结果会写回存档，以后直接读取展开文本。确实读取失败时说明具体失败，不要用附近图片或其他消息冒充转发内容。',
     category: 'query',
@@ -575,7 +576,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_active_members',
+    id: 'get_active_members', readOnly: true,
     name: '查看活跃成员',
     description: '查看当前会话最近活跃的成员（QQ 号、名字、最近发言时间、发言数），用于查看头像、@ 或拍一拍时找人。',
     category: 'query',
@@ -599,7 +600,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_chats',
+    id: 'get_chats', readOnly: true,
     name: '查看可用会话',
     description: '列出机器人参与的会话（chatKey、名字、最近消息时间）。跨会话发送（send_message 的 targetChatKey）前用它查目标。',
     category: 'query',
@@ -626,7 +627,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_message_detail',
+    id: 'get_message_detail', readOnly: true,
     name: '查看消息详情',
     description: '按 QQ 消息 id 查看单条消息详情（完整文本、发送者、时间）。id 用聊天记录里每条消息前的 #数字，不要自己编。',
     category: 'query',
@@ -652,7 +653,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_user_avatar',
+    id: 'get_user_avatar', readOnly: true,
     name: '查看 QQ 用户头像',
     description: '用户要求查看、识别或评价指定用户的 QQ 头像时调用。先读 core-media。传请求消息 #ID；target：sender=请求者，mention=真实 @，reply=引用作者，bot=机器人，context=本轮上下文已知群友（填 contextUserId）。用户直接说昵称时，从聊天记录的昵称和 QQ 号确定目标即可，不必要求 @ 或引用；缺少身份信息先查 get_active_members，同名或指代不清才询问。',
     category: 'query',
@@ -679,7 +680,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'get_message_images',
+    id: 'get_message_images', readOnly: true,
     name: '查看消息图片',
     description: '查看某条消息里的图片/表情（视觉模型可以直接看懂）。消息文本出现 [图片] 时可用。id 用聊天记录里每条消息前的 #数字。',
     category: 'query',
@@ -757,7 +758,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'memory_query',
+    id: 'memory_query', readOnly: true,
     name: '查询印象',
     description: '查看当前会话里你对群友的长期印象。不传 userId 返回全部；传 userId 只看某一个人。',
     category: 'memory',
@@ -827,7 +828,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'web_search',
+    id: 'web_search', readOnly: true,
     name: '联网搜索',
     description: '使用配置的搜索服务联网查询，返回来源和摘要；Antigravity 模式使用原生 Google 搜索，另返回带来源的 answer 与实际 searchQueries。适用：实时信息、新闻热点、梗或不确定事实。资料不足可换关键词再搜；需要精确核对时用 web_fetch 读取来源正文。',
     category: 'web',
@@ -852,7 +853,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'web_fetch',
+    id: 'web_fetch', readOnly: true,
     name: '抓取网页',
     description: '只读抓取网页正文（≤2 万字符）。群友发来链接问"写了什么"时直接抓；配合 web_search 阅读搜索结果的详细内容。禁止访问内网/本机地址。',
     category: 'web',
@@ -939,7 +940,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'list_reminders',
+    id: 'list_reminders', readOnly: true,
     name: '查看提醒',
     description: '查看当前会话里还没触发的所有提醒（闹钟）。适用：群友问"我设了什么提醒"、"还有哪些闹钟"。',
     category: 'system',
@@ -980,7 +981,7 @@ function registerAllTools() {
 
   // ── 节假日问候 ──
   registerTool({
-    id: 'check_holiday',
+    id: 'check_holiday', readOnly: true,
     name: '查询节日',
     description: '查询今天或最近有什么节日（春节/中秋/端午/元旦/国庆等中国法定与常见节日）。用于在节日时主动向群友送上问候。适用：想知道"今天是什么节日"、"最近有什么节日可以蹭个祝福"。返回节日名称与一句参考祝福语，你可以据此自然发挥（别照抄）。',
     category: 'system',
@@ -1143,7 +1144,7 @@ function registerAllTools() {
   });
 
   registerTool({
-    id: 'search_images',
+    id: 'search_images', readOnly: true,
     name: '搜索网图',
     description: '搜网图，直接拿到"能发的图片直链"。用法：先 search_images("关键词") 看列表，再挑一条用 send_image(url) 发出去。被要求"发张图/来点表情/找张照片"时用它。',
     category: 'web',
@@ -1192,7 +1193,7 @@ function registerAllTools() {
 
   // ── 视频读取 ──
   registerTool({
-    id: 'read_video',
+    id: 'read_video', readOnly: true,
     name: '读取视频',
     description: '读取消息里的视频。会返回时长/分辨率等元信息，并根据设置页的「视频模式」把画面交给模型：原生视频输入（全模态模型）或抽帧截图（普通视觉模型）。适用：群友发了一个视频，你想"看看"里面是什么。需要消息 id（聊天记录里的 #数字）。',
     category: 'query',

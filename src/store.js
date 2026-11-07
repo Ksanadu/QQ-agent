@@ -85,12 +85,13 @@ export class ChatStore {
   }
 
   /** 追加一条收到的消息（未读）。返回写入的条目。 */
-  appendIncoming(chatKey, { mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [], avatarContext = null, pureBotMention = false }) {
+  appendIncoming(chatKey, { receivedAt = Date.now(), mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [], avatarContext = null, pureBotMention = false }) {
     const st = this.#state(chatKey);
     const entry = {
       id: st.nextLocalId++,
       mid: mid ?? null,
       ts: ts || Date.now(),
+      receivedAt,
       senderId: String(senderId ?? ''),
       senderName: String(senderName ?? ''),
       text: String(text ?? ''),

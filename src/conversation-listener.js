@@ -43,10 +43,6 @@ export class ConversationListeners {
     if (task.seen.size > 1000) task.seen.delete(task.seen.values().next().value);
     task.worker.postMessage({ type: 'entry', entry: listenerMessage(entry) }); return true;
   }
-  updateAnchor(chatKey, entries) {
-    const task = this.tasks.get(chatKey);
-    if (task) task.worker.postMessage({ type: 'anchor', anchor: entries.map(listenerMessage) });
-  }
   stop(chatKey, reason = '监听已停止') { this.tasks.get(chatKey)?.close(reason); }
   stopAll() { for (const key of [...this.tasks.keys()]) this.stop(key); }
   summary() { return [...this.tasks].map(([chatKey, t]) => ({ chatKey, parentSessionId: t.parentSessionId, until: t.until, checks: t.checked })); }

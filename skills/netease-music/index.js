@@ -206,7 +206,7 @@ export async function setup(api) {
   log = api.log || (() => {});
 
   api.registerTool({
-    id: 'recommend',
+    id: 'recommend', readOnly: true,
     name: '推荐音乐',
     description:
       '按我自己的网易云曲库出推荐素材：收藏的专辑（全量）+ 红心歌单（全量），一次拿全。'
@@ -224,7 +224,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'search',
+    id: 'search', readOnly: true,
     name: '搜网易云',
     description: '在网易云音乐按关键词搜歌曲/专辑/歌手/歌单（category=song/album/artist/playlist），配合推荐补货用。',
     category: 'media',
@@ -247,7 +247,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'album',
+    id: 'album', readOnly: true,
     name: '查专辑曲目',
     description: '看一张网易云专辑的完整曲目（先 search category=album 拿专辑 ID）。',
     category: 'media',

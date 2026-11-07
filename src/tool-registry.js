@@ -11,6 +11,7 @@
 //   requiresVision: 是否需要视觉模型（true 时模型不支持图片则自动禁用）
 //   requiresSearch: 是否需要搜索服务（true 时搜索关闭则自动禁用）
 //   parameters: OpenAI function 参数 schema
+//   readOnly: true 仅限查询类工具，可在回复等待期间执行；不声明则按有副作用处理
 //   execute: 执行函数 (ctx, args) => { content, isError }
 //
 // ── Skill 化之后的职责划分 ────────────────────────────────────────────────

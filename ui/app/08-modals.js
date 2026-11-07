@@ -1389,7 +1389,9 @@ async function saveConfig({ quiet = false } = {}) {
       thinkingMode,
       thinkingEffort: effortValid ? effort : ''
     };
-    patch.wakeDelayMs = Number(val('#sc-wakedelay', c.wakeDelayMs)) || 2000;
+    const replyWait = val('#sc-wakedelay', c.wakeDelayMs);
+    patch.wakeDelayMs = replyWait !== '' && replyWait != null && Number.isFinite(Number(replyWait))
+      ? Math.max(0, Math.round(Number(replyWait))) : 2000;
     patch.drainDelayMs = Number(val('#sc-draindelay', c.drainDelayMs)) || 1200;
     patch.maxConcurrentRuns = Math.min(8, Math.max(1, Number(val('#sc-maxruns', c.maxConcurrentRuns)) || 2));
     patch.sessionRetryAttempts = Math.min(5, Math.max(0, Number(val('#sc-sessionretry', c.sessionRetryAttempts ?? 2)) || 0));

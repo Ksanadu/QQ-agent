@@ -167,7 +167,7 @@ export async function setup(api) {
   service = new ImageCommandService({ stateFile: path.join(cacheDir, 'requests.json'), preparePrompt, generateImage, saveImage,
     log, commandName: 'comfy', model: 'Anima (ComfyUI)', dailyLimit: null, maxActive: 1 });
   await refreshHealth(true);
-  api.registerTool({ id: 'status', name: '本地生图状态', category: 'media', icon: '🎨',
+  api.registerTool({ id: 'status', readOnly: true, name: '本地生图状态', category: 'media', icon: '🎨',
     description: '只查询 /comfy 本地生图状态，不生成图片。须由用户本人发送 /comfy 图片要求才出图。',
     parameters: { type: 'object', properties: {} },
     execute: async () => ({ content: JSON.stringify({ ...service.status(), ready: health.ready, reason: health.reason }) }) });

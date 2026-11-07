@@ -112,7 +112,7 @@ export async function setup(api) {
   log = api.log || (() => {});
 
   api.registerTool({
-    id: 'video',
+    id: 'video', readOnly: true,
     name: '查B站视频',
     description:
       '查一个 Bilibili 视频的详情：标题/UP主/时长/播放点赞投币数据，可加字幕、热门评论、相关视频、AI摘要。'
@@ -134,7 +134,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'search',
+    id: 'search', readOnly: true,
     name: '搜B站',
     description:
       '按关键词搜 Bilibili 的视频或用户。有人让你「搜下XX」「B站有没有XX」时用。默认返回 5 条，别自己编结果。',
@@ -156,7 +156,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'user',
+    id: 'user', readOnly: true,
     name: '查UP主',
     description: '查一个 Bilibili UP 主的资料（UID 或名字都行）：粉丝数、获赞、简介等。聊到某个 UP 主时用。',
     category: 'media',
@@ -175,7 +175,7 @@ export async function setup(api) {
   });
 
   api.registerTool({
-    id: 'hot',
+    id: 'hot', readOnly: true,
     name: '看B站热榜',
     description: '看 Bilibili 当前的热门视频。有人问「B站最近什么火」「今天有什么好看的」时用。默认 8 条。',
     category: 'media',

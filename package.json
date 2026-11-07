@@ -83,7 +83,7 @@
     "test:wakesem": "node test/wake-semantics-test.mjs",
     "test:chat-features": "node test/chat-history-tasks.mjs && node test/snowluma-ptt-patch-test.mjs && node test/qq-speech-test.mjs && node test/image-album-test.mjs && node test/bilibili-card-test.mjs && node test/conversation-listener-test.mjs && node test/conversation-listener-race.mjs && node test/conversation-listener-settings-ui.mjs",
     "test:skill-guides": "node test/skill-guides-test.mjs && node test/skill-guides-e2e.mjs && node test/skill-watch-test.mjs",
-    "test:wake-windows": "node test/wake-window-refresh-e2e.mjs && node test/pure-at-batch-e2e.mjs && node test/conversation-listener-settings-ui.mjs",
+    "test:wake-windows": "node test/reply-window-e2e.mjs && node test/wake-window-refresh-e2e.mjs && node test/pure-at-batch-e2e.mjs && node test/conversation-listener-settings-ui.mjs",
     "build:desktop": "electron-builder --win nsis --x64",
     "pack:desktop": "electron-builder --win --dir --x64",
     "test:snowluma-install": "node test/snowluma-install-test.mjs"

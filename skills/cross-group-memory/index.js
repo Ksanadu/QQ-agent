@@ -206,7 +206,7 @@ export function setup(injected) {
 
   // ── 工具 2：查本群谁被记过 ────────────────────────────────────────────
   api.registerTool({
-    id: 'recall',
+    id: 'recall', readOnly: true,
     name: '查本群印象',
     category: 'memory',
     icon: '📋',
@@ -241,7 +241,7 @@ export function setup(injected) {
 
   // ── 工具 3：跨群档案 ──────────────────────────────────────────────────
   api.registerTool({
-    id: 'profile',
+    id: 'profile', readOnly: true,
     name: '查跨群档案',
     category: 'memory',
     icon: '🗂',
@@ -308,7 +308,7 @@ export function setup(injected) {
 
   // ── 工具 5：记忆衰减概览 ─────────────────────────────────────────────
   api.registerTool({
-    id: 'decay_status',
+    id: 'decay_status', readOnly: true,
     name: '记忆衰减状态',
     category: 'memory',
     icon: '📉',
@@ -410,7 +410,7 @@ export function setup(injected) {
   // 为什么要单独一个工具：模型**编不出** chatKey（它没群号，猜出来的会凭空建出
   // 一个谁也不认的记忆目录）。要"把这段记录记到 XX 群"之前必须先用它换 chatKey。
   api.registerTool({
-    id: 'targets',
+    id: 'targets', readOnly: true,
     name: '查可选会话',
     category: 'query',
     icon: '📋',
@@ -1276,6 +1276,9 @@ async function runSaveChatlog(ctx, args) {
       );
       continue;
     }
+
+    try { ctx.assertEffectAllowed?.(); }
+    catch (error) { skipped.push(error.message); break; }
 
     // ★ 没有 QQ 号时的处理（原 chatlog-memory 的行为，必须保住）：
     //   宿主的 append() 允许"只有 target(名字)、没有 userId"，所以纯名字条目照样能进记忆库。

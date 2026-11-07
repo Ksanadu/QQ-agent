@@ -607,7 +607,7 @@ export function createApp({ log = console.log } = {}) {
     return null;
   }
 
-  async function ingestMessage(kind, id, event) {
+  async function ingestMessage(kind, id, event, receivedAt, reservation = null) {
     const cfgNow = getConfig();
     if (!allowed(kind, id, cfgNow)) return; // 白名单外的聊天完全不记录
 
@@ -723,6 +723,7 @@ export function createApp({ log = console.log } = {}) {
 
     const entry = store.appendIncoming(`${kind}:${id}`, {
       mid: event.message_id,
+      receivedAt,
       ts: event.time ? Math.round(Number(event.time) * 1000) : Date.now(),
       senderId,
       senderName,
@@ -736,7 +737,7 @@ export function createApp({ log = console.log } = {}) {
     });
     emit('chat-update', `${kind}:${id}`);
     // 逐条触发判定：把刚入库的条目交给编排器（entry 让它能精确标这一条已读）
-    orchestrator.onIncoming(`${kind}:${id}`, entry);
+    orchestrator.onIncoming(`${kind}:${id}`, entry, receivedAt, reservation);
 
     // 链接媒体转发（确定性）：刻意不 await —— 百兆级下载/上传不能卡住 ingest 热路径。
     // 内部已把错误全部收口（含 provider 抛错），这里再挂一次 catch 只为防漏网。
@@ -859,13 +860,37 @@ export function createApp({ log = console.log } = {}) {
     orchestrator.onIncoming(`${isGroup ? 'group' : 'private'}:${id}`, entry);
   }
 
+  // Serialize enrichment for each speaker so a slow quote/voice cannot be
+  // overtaken by their next message. Reserve an active reply immediately on receipt.
+  const ingress = new Map();
+  function queueIncoming(kind, id, event) {
+    const receivedAt = Date.now();
+    const chatKey = `${kind}:${id}`;
+    const actor = String(event.sender?.user_id ?? event.user_id ?? '');
+    const cfg = getConfig();
+    if (!allowed(kind, id, cfg) || isGloballyBlocked(actor)
+      || (kind === 'group' && (cfg.blocklist?.[id] || []).map(String).includes(actor))) return;
+    if (parseImageCommand(event, onebot.selfId)) return ingestMessage(kind, id, event, receivedAt);
+    const pure = kind === 'group' && isPureBotMention(imageMessageSegments(event.message ?? event.raw_message ?? ''), onebot.selfId);
+    const key = `${chatKey}:${actor}`;
+    const reservation = orchestrator.reserveIncoming(chatKey, actor, receivedAt, pure);
+    const previous = ingress.get(key);
+    const run = async () => {
+      try { await ingestMessage(kind, id, event, receivedAt, reservation); }
+      finally { reservation?.release?.(); }
+    };
+    const task = previous ? previous.then(run, run) : Promise.resolve().then(run);
+    ingress.set(key, task);
+    return task.finally(() => { if (ingress.get(key) === task) ingress.delete(key); });
+  }
+
   async function handleOneBotEvent(event) {
     if (!event || typeof event !== 'object') return;
     if (event.post_type === 'message' || event.post_type === 'message_sent') {
       // 自己发的消息（message_sent / self_id 相同）不触发处理（发送时已自行记录）
       if (String(event.user_id ?? event.sender?.user_id ?? '') === onebot.selfId) return;
-      if (event.message_type === 'group' && event.group_id != null) return ingestMessage('group', String(event.group_id), event);
-      if (event.message_type === 'private' && event.user_id != null) return ingestMessage('private', String(event.user_id), event);
+      if (event.message_type === 'group' && event.group_id != null) return queueIncoming('group', String(event.group_id), event);
+      if (event.message_type === 'private' && event.user_id != null) return queueIncoming('private', String(event.user_id), event);
       return;
     }
     if (event.post_type === 'notice' && event.notice_type === 'notify' && event.sub_type === 'poke') {
