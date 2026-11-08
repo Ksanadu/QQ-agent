@@ -90,10 +90,17 @@ try {
   assert.equal(q('#tp-chatactive'), null);
   q('#ac-keywords').value = '你好, bot ,你好';
   q('#cfg-allowgroups').value = '100,200'; q('#sc-temperature').value = '0.7';
+  const stickerSyncCount = q('#card-sticker #cfg-sticker-sync-count');
+  assert.equal(stickerSyncCount.labels[0].textContent, 'QQ 收藏同步条数');
+  assert.equal(stickerSyncCount.value, '500');
+  stickerSyncCount.value = '320';
   await save();
   assert.deepEqual(qa.state.config.allow.groups, ['100', '200']);
   assert.equal(qa.state.config.api.temperature, 0.7);
   assert.deepEqual(qa.state.config.store.keywords, ['你好', 'bot']);
+  assert.equal(qa.state.config.sticker.syncCount, 320);
+  show('chat');
+  assert.equal(q('#cfg-sticker-sync-count').value, '320');
   show('desktop');
   assert.ok(q('#cfg-theme')); assert.ok(q('#cfg-wsurl'));
   q('#cfg-wsurl').value = 'ws://127.0.0.1:3999'; q('#cfg-obtoken').value = '******';

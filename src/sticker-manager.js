@@ -2,7 +2,7 @@
 // 纯函数在 stickers.js；这里管缓存、TTL 和 OneBot 交互。
 import fs from 'node:fs';
 import path from 'node:path';
-import { getConfig, DATA_DIR } from './config.js';
+import { getConfig, DATA_DIR, normalizeStickerSyncCount } from './config.js';
 import { safeFetchBinary } from './safe-fetch.js';
 import {
   loadStickerStore, saveStickerStore, mergeStickerLibrary,
@@ -133,7 +133,7 @@ export class StickerManager {
     if (this.syncing) return this.syncing;
     this.syncing = (async () => {
       try {
-        const count = Math.min(500, Math.max(1, Number(getConfig().sticker?.promptMaxStickers) * 10 || 100));
+        const count = normalizeStickerSyncCount(getConfig().sticker?.syncCount);
         const data = await this.onebot.call('fetch_custom_face_detail', { count });
         const fetched = Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : null);
         if (!fetched) throw new Error('fetch_custom_face_detail 返回 data 不是数组');

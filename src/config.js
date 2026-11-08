@@ -25,10 +25,18 @@ export const DATA_DIR = process.env.QQ_AGENT_DATA_DIR || path.join(ROOT, `data${
 export const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 const DEFAULT_LIST_STICKERS_LIMIT = 24;
+const MAX_STICKER_SYNC_COUNT = 500;
 
 export function normalizeListStickersLimit(value, fallback = DEFAULT_LIST_STICKERS_LIMIT) {
   const n = Number(value);
   return Number.isFinite(n) && n !== 0 ? Math.max(1, Math.min(100, Math.trunc(n))) : fallback;
+}
+
+export function normalizeStickerSyncCount(value) {
+  const n = Number(value);
+  return value == null || value === '' || !Number.isFinite(n)
+    ? MAX_STICKER_SYNC_COUNT
+    : Math.min(MAX_STICKER_SYNC_COUNT, Math.max(1, Math.trunc(n)));
 }
 
 export const DEFAULT_CONFIG = {
@@ -246,7 +254,7 @@ export const DEFAULT_CONFIG = {
   // 表情包
   sticker: {
     enabled: true,
-    promptMaxStickers: 10,
+    syncCount: MAX_STICKER_SYNC_COUNT,
     collectEnabled: true,
     maxCollectPerHour: 10,
     // 发表情包的积极程度（0=不鼓励 1=偶尔 2=较积极 3=很积极）。
@@ -421,6 +429,9 @@ export function loadConfig() {
     if (Object.hasOwn(config.tools ?? {}, 'listStickersLimit')) {
       config.tools.listStickersLimit = normalizeListStickersLimit(config.tools.listStickersLimit);
     }
+    if (Object.hasOwn(config.sticker ?? {}, 'syncCount')) {
+      config.sticker.syncCount = normalizeStickerSyncCount(config.sticker.syncCount);
+    }
     return config;
   } catch (error) {
     // ⚠️ 配置文件坏了（手改错/磁盘故障）不能静默回落默认值：
@@ -520,6 +531,7 @@ const OBSOLETE_PATHS = [
   ['api', 'priceRemoteUrl'],
   ['budget'],
   ['providersImported'],
+  ['sticker', 'promptMaxStickers'],
   // 2026-09-25 档位改版：四个分档条数字段废弃，统一为 store.historyCount。
   // 老配置里的存量值会在 loadConfig 时被剔除（读条数走 historyCount / allCount 迁移兜底）。
   ['store', 'atCount'],
@@ -621,6 +633,9 @@ export function updateConfig(patch) {
   currentConfig = deepMerge(getConfig(), cleanObsolete);
   if (Object.hasOwn(currentConfig.tools ?? {}, 'listStickersLimit')) {
     currentConfig.tools.listStickersLimit = normalizeListStickersLimit(currentConfig.tools.listStickersLimit);
+  }
+  if (Object.hasOwn(currentConfig.sticker ?? {}, 'syncCount')) {
+    currentConfig.sticker.syncCount = normalizeStickerSyncCount(currentConfig.sticker.syncCount);
   }
   // 模型配置编辑的是当前提供商的连接信息；聊天、模型目录和连通性测试
   // 必须读到同一组 URL / Key，不能只改顶层却继续使用目录里的旧值。

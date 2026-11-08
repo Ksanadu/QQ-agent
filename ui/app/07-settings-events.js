@@ -264,6 +264,8 @@ function bindSettingsEvents(c) {
 
   const listStickersLimit = $('#cfg-list-stickers-limit');
   listStickersLimit?.addEventListener('change', () => listStickersLimit.reportValidity());
+  const stickerSyncCount = $('#cfg-sticker-sync-count');
+  stickerSyncCount?.addEventListener('change', () => stickerSyncCount.reportValidity());
 
   /** 实时更新提示词预览（旧版在前端拼静态模板，已改为后端同源组装） */
   function updatePromptPreview() {

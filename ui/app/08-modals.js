@@ -1413,11 +1413,12 @@ async function saveConfig({ quiet = false } = {}) {
       checkIntervalMaxMs: Number(val('#cfg-pro-max', c.proactive?.checkIntervalMaxMs)) || 5400000,
       probability: Number(val('#cfg-pro-prob', c.proactive?.probability ?? 0.25)) || 0.25
     };
+    const stickerSyncCount = el('#cfg-sticker-sync-count');
     patch.sticker = {
       ...(c.sticker || {}),
       enabled: chk('#cfg-sticker', !!c.sticker?.enabled),
       encourage: Math.min(3, Math.max(0, Number(val('#cfg-sticker-encourage', c.sticker?.encourage ?? 1)) || 0)),
-      promptMaxStickers: Math.min(50, Math.max(1, Number(val('#cfg-sticker-promptmax', c.sticker?.promptMaxStickers ?? 10)) || 10))
+      ...(stickerSyncCount?.validity.valid ? { syncCount: stickerSyncCount.valueAsNumber } : {})
     };
     const listenerDelay = (selector, current, fallback) => {
       const raw = val(selector, current ?? fallback);

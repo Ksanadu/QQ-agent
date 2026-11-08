@@ -45,7 +45,11 @@ try {
   assert.match(cli, /SnowLuma 已就绪/); assert.ok(!fs.existsSync(path.join(root, 'runtime')));
   console.log('PASS source setup checks SnowLuma without creating a portable QQ runtime');
 
-  const env = await bootApp({ config: { snowluma: { dir: root, autoLaunch: false }, chatActive: { enabled: true, ttlMinutes: 30 } } });
+  const env = await bootApp({ config: {
+    snowluma: { dir: root, autoLaunch: false },
+    chatActive: { enabled: true, ttlMinutes: 30 },
+    sticker: { promptMaxStickers: 17 }
+  } });
   try {
     assert.equal(env.app.getConfig().chatActive, undefined);
     env.app.store.appendIncoming('group:456', { mid: 1, senderId: '900', senderName: '测试', text: '历史内容', ts: Date.now() });
@@ -80,5 +84,25 @@ try {
     assert.equal(clamped.data.config.tools.listStickersLimit, 100);
     assert.equal((await lookup({})).stickers.length, 100);
     console.log('PASS list_stickers default persists, takes effect without rebuilding tools, preserves explicit limits and filters');
+
+    const syncCounts = [];
+    const callOneBot = env.app.onebot.call.bind(env.app.onebot);
+    env.app.onebot.call = (action, args, ...rest) => {
+      if (action === 'fetch_custom_face_detail') syncCounts.push(args.count);
+      return callOneBot(action, args, ...rest);
+    };
+    assert.equal(env.app.getConfig().sticker.promptMaxStickers, undefined);
+    assert.equal(env.app.getConfig().sticker.syncCount, 500);
+    await env.app.stickers.list();
+    const changed = await env.request('POST', '/api/config', { body: { sticker: { syncCount: 320 } } });
+    assert.equal(changed.data.config.sticker.syncCount, 320);
+    assert.equal(loadConfig().sticker.syncCount, 320);
+    await env.app.stickers.list();
+    assert.deepEqual(syncCounts, [500], 'the TTL cache is still reused');
+    env.app.stickers.syncedAt -= 60001;
+    await env.app.stickers.list();
+    assert.deepEqual(syncCounts, [500, 320], 'the next sync uses the exact configured count');
+    assert.equal(env.app.getConfig().tools.listStickersLimit, 100, 'the model return limit is independent');
+    console.log('PASS sticker sync defaults to 500, ignores the obsolete setting, and requests the saved count without a multiplier');
   } finally { await env.teardown(); }
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
