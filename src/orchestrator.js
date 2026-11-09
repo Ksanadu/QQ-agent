@@ -514,6 +514,12 @@ export class Orchestrator {
       session = this.sessions.create({ chatKey, trigger: triggerEntries, triggerSummary });
       this.emit('session-start', { sessionId: session.id, chatKey, triggerSummary });
     }
+    const runStartedAt = Date.now();
+    const receivedAt = !reuseSessionId && first?.receivedAt ? first.receivedAt : session.startedAt;
+    session.timing = {
+      receivedAt, runStartedAt, queueMs: Math.max(0, runStartedAt - receivedAt),
+      modelMs: 0, toolMs: 0, sendPrepareMs: 0, sendReceiptMs: 0
+    };
     session.followUpFromListener = fromListener;
     this.#rememberHandled(chatKey, triggerEntries);
     if (!proactive && !window) {
@@ -986,7 +992,14 @@ export class Orchestrator {
       // 网络抖动/5xx/429 会自动重试（同一轮请求，messages 不变，幂等不重复发言）。
       // abortSignal：会话级中止时在途请求立即断开 —— isRetryableError 把
       // "中止"判为不可重试，chatCompletionWithRetry 不再打下一发，直接上抛。
-      const response = await chatCompletionWithRetry({ messages, tools: deliveryRound ? toOpenAiTools(deliveryTools) : openAiTools, skillContext, signal: abortSignal });
+      const modelStarted = performance.now();
+      let response, modelDurationMs;
+      try {
+        response = await chatCompletionWithRetry({ messages, tools: deliveryRound ? toOpenAiTools(deliveryTools) : openAiTools, skillContext, signal: abortSignal });
+      } finally {
+        modelDurationMs = Math.round(performance.now() - modelStarted);
+        session.timing.modelMs += modelDurationMs;
+      }
       abortSignal.throwIfAborted();
       budget.modelRounds++;
       session.model = response.model || session.model;
@@ -1022,6 +1035,7 @@ export class Orchestrator {
       messages.push(assistantEntry);
       // Display-only metadata: do not feed returned reasoning into later requests.
       session.messages.push({ ...structuredClone(assistantEntry),
+        durationMs: modelDurationMs,
         raw: structuredClone(response.raw ?? null),
         ...(typeof response.reasoning === 'string' && response.reasoning.trim() ? { reasoningSummary: response.reasoning } : {}) });
       session.rounds = budget.modelRounds;
@@ -1137,6 +1151,7 @@ export class Orchestrator {
         if (!lastAssistantUi.tool_calls) lastAssistantUi.tool_calls = structuredClone(toolCalls);
       }
       for (const call of toolCalls) {
+        const toolStarted = performance.now();
         const name = call?.function?.name ?? '';
         const argsRaw = call?.function?.arguments ?? '{}';
         if (name === 'web_search' || name === 'web_fetch') webSearchCount += 1;
@@ -1212,7 +1227,9 @@ export class Orchestrator {
           contentStr = String(result.content);
         }
         toolResults.push({ role: 'tool', tool_call_id: call.id, name, content: contentStr, isError: !!result.isError });
-        session.messages.push({ toolCall: { name, args: safeParse(argsRaw), result: contentStr.slice(0, 2000), isError: !!result.isError } });
+        const durationMs = Math.round(performance.now() - toolStarted);
+        session.timing.toolMs += durationMs;
+        session.messages.push({ toolCall: { name, args: safeParse(argsRaw), result: contentStr.slice(0, 2000), isError: !!result.isError, durationMs } });
         if (media.length) {
           const imgCount = media.filter((p) => p.type === 'image_url').length;
           const vidCount = media.filter((p) => p.type === 'video_url').length;

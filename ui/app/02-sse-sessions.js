@@ -36,6 +36,7 @@ function connectSSE() {
     // sent/finishReason 等收尾字段：后端给了才进 patch。
     // 不能无脑写 null —— pending 合并时 null 会把之前已有的值冲掉。
     if (Array.isArray(data.sent)) patch.sent = data.sent;
+    if (data.timing !== undefined) patch.timing = data.timing;
     if (data.finishReason !== undefined) patch.finishReason = data.finishReason;
     if (data.error !== undefined) patch.error = data.error;
     if (data.endedAt !== undefined) patch.endedAt = data.endedAt;
@@ -518,7 +519,8 @@ function renderSessionDetail(s) {
   if (!detail) return;
   // 内容没变（轮询/SSE 重复推送）→ 完全不动 DOM，保住滚动位置和展开状态
   // json 模式切换也要触发重渲染
-  const fp = `${s.id}|${s.status}|${s.rounds || 0}|${(s.messages || []).length}|${(s.sent || []).length}|${s.error ? 1 : 0}|${s.activity || ''}|${state.sessionJsonMode === s.id ? 'json' : 'ui'}`;
+  const timing = s.timing;
+  const fp = `${s.id}|${s.status}|${s.rounds || 0}|${(s.messages || []).length}|${(s.sent || []).length}|${s.error ? 1 : 0}|${s.activity || ''}|${JSON.stringify(timing)}|${state.sessionJsonMode === s.id ? 'json' : 'ui'}`;
   if (lastDetailFp === fp) return;
   const firstRender = lastDetailFp === null;
   lastDetailFp = fp;
@@ -529,6 +531,7 @@ function renderSessionDetail(s) {
   const chatName = formatChatTitle(s.chatKey, chatNameOf(s.chatKey));
   const statusBadge = `<span class="status-badge status-${s.status}">${STATUS_LABEL[s.status] || s.status}</span>`;
   const usage = s.usage || {};
+  const ms = (value) => Number.isFinite(value) ? `${(value / 1000).toFixed(2)} 秒` : '—';
 
   const html = [];
   const canDelete = s.status !== 'running';   // 运行中的会话不能删（usage 还在累加）
@@ -546,6 +549,14 @@ function renderSessionDetail(s) {
         <span>${s.rounds || 0} 轮工具</span>
         <span>联网搜索 ${Number(s.webSearchCount) || 0} 次</span>
       </div>
+      ${timing ? `<div class="sub session-timing">
+        <span>首条文字 ${ms(timing.firstTextMs)}</span>
+        ${s.endedAt ? `<span>整轮 ${ms(Math.max(0, s.endedAt - timing.receivedAt))}</span>` : ''}
+        <span>启动前 ${ms(timing.queueMs)}</span>
+        <span>模型 ${ms(timing.modelMs)}</span>
+        <span>工具 ${ms(timing.toolMs)}</span>
+        <span title="包含在工具耗时内">发送回执 ${ms(timing.sendReceiptMs)}</span>
+      </div>` : ''}
     </div>`);
 
   const jsonMode = state.sessionJsonMode === s.id;
@@ -562,6 +573,7 @@ function renderSessionDetail(s) {
         role: m.role,
         content: m.content,
         reasoningSummary: m.reasoningSummary || null,
+        durationMs: m.durationMs ?? null,
         tool_calls: m.tool_calls ?? null,
         raw: m.raw ?? null
       })),
@@ -571,6 +583,7 @@ function renderSessionDetail(s) {
       listenerChecks: (s.messages || []).filter(m => m.listenerCheck).map(m => m.listenerCheck),
       sent: s.sent || [],
       usage: s.usage || null,
+      timing: timing ?? null,
       status: s.status,
       error: s.error ?? null
     };

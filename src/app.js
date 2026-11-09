@@ -402,6 +402,7 @@ export function createApp({ log = console.log } = {}) {
             webSearchCount: s.webSearchCount ?? 0,
             rounds: s.rounds ?? 0,
             usage: s.usage ?? null,
+            timing: s.timing ?? null,
             trigger: s.triggerSummary ?? '',
             triggerSummary: s.triggerSummary ?? '',
             messages: s.messages ?? [],

@@ -76,4 +76,18 @@ try {
   mode='http-error';await assert.rejects(webSearch('上游不可用'),/HTTP 503/);
   assert.equal(calls.length,3);
   console.log('✓ ungrounded answers and HTTP errors fail explicitly without silently switching engines');
+
+  const { buildToolDefs, executeTool } = await import('../src/tools.js');
+  const defs=buildToolDefs(), ctx={};
+  const query=(query,context=ctx)=>executeTool(defs,context,'web_search',JSON.stringify({query}));
+  assert.equal((await query('补核 官方日期')).isError,true);
+  mode='ok';
+  const fresh=JSON.parse((await query('补核 官方日期')).content);
+  const reused=JSON.parse((await query(' 补核   官方日期 ')).content);
+  assert.deepEqual(reused,{...fresh,reused:true});
+  assert.equal(calls.length,5,'a failure is retried, a successful identical query is not');
+  await query('补核 地区差异');
+  await query('补核 官方日期',{});
+  assert.equal(calls.length,7,'different queries and different runs are still fresh');
+  console.log('✓ repeat successful normalized queries reuse sources within a run; failures and new queries can still reach Google');
 } finally {await env.teardown();native.close();}

@@ -47,15 +47,16 @@ try{
   const catalogue={toolCalls:[{name:'list_stickers',args:{query:'得意'}}]};
   const sendSticker=id=>({toolCalls:[{name:'send_sticker',args:{stickerId:id}}]});
   const sequential=await run(113,'查表情，先回复文字，再补发表情',[
-    guide,catalogue,send('掌声不要停'),sendSticker(sticker.id),finish
+    send('掌声不要停'),guide,catalogue,sendSticker(sticker.id),finish
   ]);
   assert.equal(sequential.session.status,'done');assert.equal(sequential.requests.length,5);
+  assert.match(sequential.session.systemPrompt,/文字可独立回答时先发文字/);
   assert.deepEqual(sequential.session.sent.map(x=>x.type),['text','sticker']);
   assert.ok(sequential.requests[3].tools.some(t=>t.function.name==='send_sticker'));
-  assert.ok(sequential.requests[3].messages.some(m=>m.role==='tool'&&m.name==='send_message'&&String(m.content).includes('messageIds')));
+  assert.ok(sequential.requests[1].messages.some(m=>m.role==='tool'&&m.name==='send_message'&&String(m.content).includes('messageIds')));
   assert.ok(onebotHttp.state.sends.some(s=>s.body.message.some(m=>m.type==='image')),'sticker must reach the queued mock QQ sender');
   assert.equal(sequential.session.finishReason,'试图结束');
-  console.log('✓ catalogue → text → sticker → explicit finish works across separate model calls');
+  console.log('✓ text is delivered before the catalogue query; sticker and explicit finish can follow');
 
   const retriedSticker=await run(114,'文字发出后表情失败仍可修正',[
     guide,catalogue,send('再补一张表情'),sendSticker('missing-sticker'),sendSticker(sticker.id),finish
@@ -108,9 +109,13 @@ try{
   await request('POST','/api/config',{body:{api:{maxRounds:3}}});
 
   failText=true;
-  const failed=await run(106,'失败发送不算完成',[send('失败的消息'),finish,finish,send('仍然失败')]);
+  const failed=await run(106,'失败发送不算完成',[
+    {toolCalls:[...send('失败的消息').toolCalls,...finish.toolCalls]},finish,finish,send('仍然失败')
+  ]);
   assert.equal(failed.session.status,'error');assert.equal(failed.session.completion.delivered,false);
   assert.equal(failed.session.sent.length,0);failText=false;
+  assert.equal(failed.session.messages.find(x=>x.toolCall?.name==='finish').toolCall.isError,true);
+  assert.equal(failed.session.timing.firstTextMs,undefined);
   console.log('✓ failed send_message does not grant completion');
 
   await app.sender.sendTextBatch('group:456',['已有相同文字']);
@@ -128,10 +133,17 @@ try{
   assert.equal(cross.session.sent[0].to,'private:777');assert.equal(cross.session.sent[1].to,'group:456');
   console.log('✓ successful send_to cannot replace current-chat send_message');
 
-  const allowed=await run(109,'先发文字再结束',[{toolCalls:[{name:'send_message',args:{messages:'正常完成'}},{name:'finish',args:{summary:'已回复'}}]}]);
+  const allowed=await run(109,'先发文字再结束',[{delayMs:40,toolCalls:[...send('正常完成').toolCalls,...finish.toolCalls]}]);
   assert.equal(allowed.session.status,'done');assert.equal(allowed.requests.length,1);
   assert.equal(allowed.session.messages.find(x=>x.toolCall?.name==='finish').toolCall.isError,false);
-  console.log('✓ send_message followed by finish in the same batch completes normally');
+  const { timing } = allowed.session;
+  assert.equal(timing.firstTextMs,allowed.session.sent[0].sentAt-timing.receivedAt);
+  assert.equal(timing.queueMs,timing.runStartedAt-timing.receivedAt);
+  assert.ok(timing.modelMs>=35);
+  assert.equal(timing.toolMs,allowed.session.messages.reduce((n,m)=>n+(m.toolCall?.durationMs||0),0));
+  assert.ok(Number.isInteger(timing.sendReceiptMs));
+  assert.deepEqual((await request('GET','/api/sessions/'+allowed.session.id)).data.timing,timing);
+  console.log('✓ explicit send → finish takes one model request; queue, model, tool and receipt timings are saved');
 
   const stopped=await run(115,'发完文字后由模型自然结束',[send('完整答复'),{content:''}]);
   assert.equal(stopped.session.status,'done');assert.equal(stopped.requests.length,2);

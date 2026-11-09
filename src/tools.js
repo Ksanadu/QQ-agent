@@ -14,7 +14,7 @@ import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
 import { skillManager } from './skills/manager.js';
 import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } from './safe-fetch.js';
-import { webSearch, webFetch } from './web-search.js';
+import { webSearch, webFetch, sanitizeQuery } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
 import { findMessageWithReply } from './message-replies.js';
 import { avatarMemberIds, avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
@@ -28,6 +28,8 @@ import { localStickerPath, readLocalStickerImage } from './sticker-manager.js';
 // 魔数识别统一用 image-type.js：本文件原先自带一份，WebP 判断写成 toString(0, 8) === 'RIFF'，永远不成立
 import { detectMime } from './image-type.js';
 import { isGifBuffer, gifToVideoDataUrl, resolveGifRoute } from './gif-to-video.js';
+
+const WEB_SEARCH_MEMO = Symbol('web search results for this run');
 
 /** 当前配置的 GIF 选路（vision/video 开关组合，规则矩阵见 resolveGifRoute 注释）。 */
 function currentGifRoute() {
@@ -831,7 +833,7 @@ function registerAllTools() {
   registerTool({
     id: 'web_search', readOnly: true,
     name: '联网搜索',
-    description: '使用配置的搜索服务联网查询，返回来源和摘要；Antigravity 模式使用原生 Google 搜索，另返回带来源的 answer 与实际 searchQueries。适用：实时信息、新闻热点、梗或不确定事实。资料不足可换关键词再搜；需要精确核对时用 web_fetch 读取来源正文。',
+    description: '联网查证，返回来源和摘要。首查覆盖问题所需对象；证据足够就回答，只有明确缺口才针对性补搜。已有相关来源时可用 web_fetch 核对正文。Antigravity 另返回带来源的 answer 和实际 searchQueries。',
     category: 'web',
     icon: '🔍',
     requiresSearch: true,
@@ -842,11 +844,16 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       try {
-        const result = await webSearch(String(args.query ?? ''));
-        if (!result.results.length) {
-          return ok({ query: result.query, results: [], note: '没有搜到结果，试试换关键词或更具体的说法。' });
-        }
-        return ok(result);
+        const query = sanitizeQuery(args.query).trimEnd();
+        const config = getConfig();
+        if (ctx[WEB_SEARCH_MEMO]?.config !== config) ctx[WEB_SEARCH_MEMO] = { config, results: new Map() };
+        const { results } = ctx[WEB_SEARCH_MEMO];
+        if (results.has(query)) return ok({ ...results.get(query), reused: true });
+        const result = await webSearch(query);
+        const output = result.results.length ? result
+          : { query: result.query, results: [], note: '没有搜到结果，仍需查证时请换更具体的关键词。' };
+        results.set(query, output);
+        return ok(output);
       } catch (error) {
         return err(`搜索失败：${error?.message ?? error}`);
       }
@@ -886,7 +893,7 @@ function registerAllTools() {
   registerTool({
     id: 'finish',
     name: '结束会话',
-    description: '结束当前会话。必须先通过 send_message 向当前聊天实际发送成功；只贴表情、发图、普通输出或发送失败时不可完结。summary 只供管理端记录，不会发给群友。',
+    description: '结束当前会话。没有后续动作时可与 send_message 同批，按发送在前、finish 在后的顺序。只有 send_message 向当前聊天实际发送成功才生效；表情、发图、普通输出或发送失败均不算。summary 只供管理端记录。',
     category: 'system',
     icon: '✅',
     parameters: {

@@ -266,10 +266,13 @@ export class OneBotClient {
     // Optional known bytes/hash identify media whose URL changes after QQ upload.
     // They are used locally for verification and never added to the HTTP body.
     const proof = delivery.message ? { ...params, message: delivery.message } : params;
+    const prepareStarted = performance.now();
     const attempt = await this.deliveryVerifier.prepare(action, proof, this.selfId,
       (name, args, limit) => this.#callHttp(name, args, limit));
+    delivery.onTiming?.('sendPrepareMs', Math.round(performance.now() - prepareStarted));
     if (delivery.waitBeforeSend) await delivery.waitBeforeSend();
     delivery.beforeSend?.(); // Recheck cancellation, permissions and version after the async snapshot.
+    const sendStarted = performance.now();
     try {
       return await this.#callHttp(action, params, timeoutMs);
     } catch (error) {
@@ -277,6 +280,8 @@ export class OneBotClient {
       if (!receipt) throw error;
       console.warn(`[onebot] ${action} 返回失败，但已核实送达${receipt.message_id != null ? ` #${receipt.message_id}` : ''}；停止重发。原错误：${error.message}`);
       return receipt;
+    } finally {
+      delivery.onTiming?.('sendReceiptMs', Math.round(performance.now() - sendStarted));
     }
   }
 
@@ -362,18 +367,18 @@ export class OneBotClient {
     return segments;
   }
 
-  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null, waitBeforeSend = null } = {}) {
+  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'text', data: { text: escapeCqText(String(text ?? '')) } });
-    return this.sendSegments(kind, id, segments, { beforeSend, waitBeforeSend });
+    return this.sendSegments(kind, id, segments, { beforeSend, waitBeforeSend, onTiming });
   }
 
-  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null } = {}) {
+  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     // subType=1 请求协议端按"表情样式"渲染（小图气泡）；不支持该字段的实现会忽略它。
     segments.push({ type: 'image', data: { file: String(imageUrl), subType: 1 } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming });
   }
 
   /**
@@ -387,23 +392,23 @@ export class OneBotClient {
    * 段结构与 sendSticker 完全一样（都是 image 段），区别只是语义：
    * 那个是"发表情"，这个是"发一张图"。所以复用同一套 reply/at 处理。
    */
-  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null } = {}) {
+  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
     const ref = String(fileRef ?? '').trim();
     if (!ref) throw new Error('图片内容为空');
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'image', data: { file: ref } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming });
   }
 
-  async sendPoke(kind, id, targetUserId, { beforeSend = null, waitBeforeSend = null } = {}) {
+  async sendPoke(kind, id, targetUserId, { beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
     const params = kind === 'private' ? { user_id: Number(id) } :
       { group_id: Number(id), user_id: Number(targetUserId || id) };
     try {
-      return await this.call(kind === 'private' ? 'friend_poke' : 'group_poke', params, null, { beforeSend, waitBeforeSend });
+      return await this.call(kind === 'private' ? 'friend_poke' : 'group_poke', params, null, { beforeSend, waitBeforeSend, onTiming });
     } catch {
       // The fallback must recheck the session/version too.
-      return this.call('send_poke', params, null, { beforeSend, waitBeforeSend });
+      return this.call('send_poke', params, null, { beforeSend, waitBeforeSend, onTiming });
     }
   }
 

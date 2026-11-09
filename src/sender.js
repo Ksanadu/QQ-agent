@@ -84,9 +84,11 @@ export class SendQueue {
 
   #deliveryOptions(chatKey, options = {}) {
     const context = this.deliveryContext.getStore();
+    const timing = context?.session.timing;
     return {
       waitBeforeSend: context?.waitBeforeSend,
-      beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); context?.beforeSend?.(); }
+      beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); context?.beforeSend?.(); },
+      ...(timing && { onTiming: (phase, ms) => { timing[phase] += ms; } })
     };
   }
 
@@ -98,8 +100,13 @@ export class SendQueue {
     const context = this.deliveryContext.getStore();
     if (context) {
       const { session, emit } = context;
-      session.sent.push({ type: receipt.kind || 'text', text: receipt.text, messageId: receipt.messageId,
-        to: receipt.chatKey, at: formatClockTime(Date.now()), sentAt: Date.now(), sessionId: session.id });
+      const type = receipt.kind || 'text';
+      const sentAt = Date.now();
+      if (session.timing && session.timing.firstTextMs == null && type === 'text' && receipt.chatKey === session.chatKey) {
+        session.timing.firstTextMs = Math.max(0, sentAt - session.timing.receivedAt);
+      }
+      session.sent.push({ type, text: receipt.text, messageId: receipt.messageId,
+        to: receipt.chatKey, at: formatClockTime(sentAt), sentAt, sessionId: session.id });
       emit('session-update', session.id);
     }
     this.onSent?.(receipt);

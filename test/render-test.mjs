@@ -662,6 +662,7 @@ const ctx = vm.createContext(sandbox);
     fireSse('session-update', {
       sessionId: 's_sse_1', chatKey: 'group:1', status: 'running', activity: '',
       rounds: 1, usage: { calls: 1 },
+      timing: { firstTextMs: 1000, queueMs: 20, modelMs: 740, toolMs: 240, sendReceiptMs: 190 },
       messages: [{ role: 'assistant', content: '让我想想' },
         { toolCall: { name: 'send_message', args: { messages: '实时你好' }, result: '已发送' } }],
       sent: [{ type: 'text', text: '实时你好', at: '12:00:00' }]
@@ -674,6 +675,9 @@ const ctx = vm.createContext(sandbox);
     const okSent = html1.includes('实时你好');
     okSent ? pass++ : fail++;
     console.log('  ' + (okSent ? 'OK   ' : 'FAIL ') + '已发送徽标实时出现（不等轮询/手动刷新）' + (okSent ? '' : ' -> ' + html1.slice(0, 100)));
+    const okTiming = html1.includes('首条文字 1.00 秒') && html1.includes('发送回执 0.19 秒');
+    okTiming ? pass++ : fail++;
+    console.log('  ' + (okTiming ? 'OK   ' : 'FAIL ') + '会话详情实时显示阶段耗时');
 
     // ② session-end：当前开着的会话必须自动重拉完整详情（最终 sent/finishReason）
     const finalSession = { id: 's_sse_1', chatKey: 'group:1', status: 'done', startedAt: 1, endedAt: 2,

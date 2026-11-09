@@ -498,6 +498,7 @@ span.unread {
 .detail-header { margin-bottom: 14px; }
 .detail-header h2 { font-size: 16px; margin-bottom: 6px; }
 .detail-header .sub { color: var(--tx3); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+.detail-header .session-timing { color: var(--tx2); margin-top: 6px; row-gap: 4px; }
 
 /* 消息气泡 */
 .msg { display: flex; gap: 11px; max-width: 86%; margin-bottom: 12px; }
