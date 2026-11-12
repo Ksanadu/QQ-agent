@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
 import { searchChatHistory } from './chat-history.js';
+import { modelMessage } from './chat-visibility.js';
 
 const MESSAGES_DIR = path.join(DATA_DIR, 'messages');
 
@@ -59,6 +60,21 @@ export class ChatStore {
     return this.chats.get(chatKey);
   }
 
+  #recallIndexes = new WeakMap();
+
+  #recallIndex(state) {
+    if (!this.#recallIndexes.has(state)) {
+      const mids = new Set((state.recalledMids || []).map(String));
+      for (const message of state.messages) if (message.recalled && message.mid != null) mids.add(String(message.mid));
+      this.#recallIndexes.set(state, mids);
+    }
+    return this.#recallIndexes.get(state);
+  }
+
+  isRecalled(chatKey, mid) {
+    return mid != null && this.#recallIndex(this.#state(chatKey)).has(String(mid));
+  }
+
   listChats() {
     // 从磁盘文件名还原（group_123.json -> group:123），已加载的直接带上
     try {
@@ -72,7 +88,7 @@ export class ChatStore {
   }
 
   search(chatKey, options = {}) {
-    return searchChatHistory(this.#state(chatKey).messages, options);
+    return searchChatHistory(this.#state(chatKey).messages.map(m => modelMessage(this, chatKey, m)).filter(Boolean), options);
   }
 
   getChatMeta(chatKey) {
@@ -87,6 +103,7 @@ export class ChatStore {
   /** 追加一条收到的消息（未读）。返回写入的条目。 */
   appendIncoming(chatKey, { receivedAt = Date.now(), mid, ts, senderId, senderName, text, reply = null, media = [], isPoke = false, atMe = null, atNames = [], avatarContext = null, pureBotMention = false }) {
     const st = this.#state(chatKey);
+    const recalled = mid != null && this.#recallIndex(st).has(String(mid));
     const entry = {
       id: st.nextLocalId++,
       mid: mid ?? null,
@@ -96,7 +113,8 @@ export class ChatStore {
       senderName: String(senderName ?? ''),
       text: String(text ?? ''),
       self: false,
-      read: false,
+      read: recalled,
+      ...(recalled ? { recalled: true } : {}),
       reply: reply || null,
       media: Array.isArray(media) ? media : [],
       // 拍一拍事件：可作触发批（resolveContextTier 按 1 档响应），但不进【已读信息】
@@ -280,15 +298,21 @@ export class ChatStore {
   /**
    * 标记一条消息已被用户撤回（按 QQ 消息 id）。
    * 撤回的消息后续不再发给大模型（buildPastState 会过滤 recalled）。
-   * @returns {boolean} 是否找到并标记了
+   * @returns {boolean} 是否首次收到该撤回；消息尚未入库时同样记下 ID。
    */
   markRecalled(chatKey, mid) {
     const st = this.#state(chatKey);
-    const target = String(mid);
-    const m = st.messages.find((x) => String(x.mid) === target);
-    if (!m) return false;
-    m.recalled = true;
-    m.read = true;   // 撤回的消息也算"已读"，不再触发回复
+    const target = String(mid ?? '');
+    if (!/^-?[1-9]\d*$/.test(target) || !Number.isSafeInteger(Number(target))) return false;
+    const recalls = this.#recallIndex(st);
+    if (recalls.has(target)) return false;
+    recalls.add(target);
+    (st.recalledMids ||= []).push(target);
+    for (const m of st.messages) {
+      if (String(m.mid) !== target) continue;
+      m.recalled = true;
+      m.read = true;
+    }
     saveChat(st);
     return true;
   }
@@ -302,7 +326,7 @@ export class ChatStore {
     const st = this.#state(chatKey);
     const target = String(mid);
     const m = st.messages.find((x) => String(x.mid) === target);
-    if (!m) return false;
+    if (!m || this.isRecalled(chatKey, mid)) return false;
     if (text != null) m.text = String(text);
     if (appendMedia.length) {
       m.media = Array.isArray(m.media) ? m.media : [];

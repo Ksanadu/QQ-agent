@@ -250,6 +250,7 @@ export class SessionRegistry {
       startedAt: s.startedAt,
       endedAt: s.endedAt ?? null,
       status: s.status,                      // waiting | running | done | noreply | error | aborted
+      retryAllowed: s.status === 'error' && !(s.sent || []).length && !s.nonDeliveryEffectStarted && !s.deliveryUnconfirmed,
       waitUntil: s.waitUntil ?? null,
       activity: s.activity ?? '',
       webSearchCount: s.webSearchCount ?? 0,
@@ -351,6 +352,7 @@ export class SessionRegistry {
     const s = this.current.get(id);
     if (!s) return null;
     s.status = status;
+    s.activity = '';
     s.endedAt = Date.now();
     this.current.delete(id);
     this._lastPersistAt?.delete(id);   // 节流时间戳随会话结束清理，防止 map 无限增长

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { hasMessageId } from './text-delivery.js';
 
 const MESSAGE_ACTIONS = new Set(['send_group_msg', 'send_private_msg', 'send_msg']);
 const POKE_ACTIONS = new Set(['group_poke', 'friend_poke', 'send_poke']);
@@ -100,7 +101,7 @@ export class DeliveryVerifier {
     for (const [id, at] of this.consumed) if (now - at > 120000) this.consumed.delete(id);
   }
 
-  async prepare(action, params, selfId, query) {
+  async prepare(action, params, selfId, query, { signal } = {}) {
     if (!selfId || (!MESSAGE_ACTIONS.has(action) && !POKE_ACTIONS.has(action))) return null;
     const kind = params.group_id != null ? 'group' : 'private';
     const peer = String(kind === 'group' ? params.group_id : params.user_id);
@@ -114,18 +115,18 @@ export class DeliveryVerifier {
       // Snapshot BEFORE submitting, so an old identical message (even in the
       // same second) cannot turn a real failure into a false success.
       try {
-        for (const row of await this.history(attempt)) attempt.beforeIds.add(mid(row));
+        for (const row of await this.history(attempt, signal)) attempt.beforeIds.add(mid(row));
         attempt.baseline = true;
-      } catch { /* Self echoes remain usable when history is unavailable. */ }
+      } catch { signal?.throwIfAborted(); /* Self echoes remain usable if history is unavailable. */ }
     }
     attempt.startedAt = Date.now();
     attempt.eventCursor = this.serial;
     return attempt;
   }
 
-  async history(a) {
+  async history(a, signal) {
     const action = a.kind === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history';
-    const data = await a.query(action, { [a.kind === 'group' ? 'group_id' : 'user_id']: Number(a.peer), count: 30 }, 1500);
+    const data = await a.query(action, { [a.kind === 'group' ? 'group_id' : 'user_id']: Number(a.peer), count: 30 }, 1500, signal);
     if (!Array.isArray(data?.messages)) throw new Error('History unavailable');
     return data.messages;
   }
@@ -159,7 +160,7 @@ export class DeliveryVerifier {
       }
       for (const { row, echo } of rows) {
         const id = mid(row), key = `${a.kind}:${a.peer}:${id}`;
-        if (!id || id === '0' || a.beforeIds.has(id) || this.consumed.has(key) || !this.destination(a, row, echo)) continue;
+        if (!hasMessageId(id) || a.beforeIds.has(id) || this.consumed.has(key) || !this.destination(a, row, echo)) continue;
         const ts = timestamp(row);
         if (!Number.isFinite(ts) || ts < Math.floor(a.startedAt / 1000) * 1000 || ts > Date.now() + 2000) continue;
         // Without a baseline, same-second historical rows are ambiguous.

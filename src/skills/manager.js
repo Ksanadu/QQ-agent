@@ -417,6 +417,7 @@ export class SkillManager {
   async runHook(name, context = {}) {
     const results = [];
     for (const skill of this.registry.list()) {
+      context.signal?.throwIfAborted();
       const fn = skill.hooks?.[name];
       if (typeof fn !== 'function') continue;
       const st = this.isActive(skill.manifest.id, context);

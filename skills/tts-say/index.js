@@ -1,5 +1,6 @@
 // 纯离线普通话 Kokoro / 粤语 VITS / Windows SAPI。交付记录由核心发送器负责。
 import { chatAllowed } from '../../src/chat-policy.js';
+import { interruptible } from '../../src/run-signal.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { resolveSpeechLanguage } from './speech-language.js';
@@ -16,9 +17,9 @@ const INJECT_TAG = '【语音触发】';
 const CROSS_TAG = '【语音转达】';
 
 /** 核心用户提示的输入段；兼容仍使用旧标题的宿主与旧会话。 */
-const INPUT_HEADING_RE = /(?:^|\n)【本轮输入】以下是[^\n]*\n/u;
+const INPUT_HEADING_RE = /(?:^|\n)【本轮(?:输入|新增消息)】以下是[^\n]*\n/u;
 const LEGACY_INPUT_MARKER = '【未读信息】';
-const CORE_SECTION_RE = /\n【(?:记忆|已读信息|新已读信息|本轮输入|未读信息|新加入成员|当前时间|角色设定|表情包|引导说明|主动机会)/;
+const CORE_SECTION_RE = /\n【(?:记忆|已读信息|新已读信息|本轮输入|本轮引用对象绑定|未读信息|新加入成员|当前时间|角色设定|表情包|引导说明|主动机会)/;
 
 const DEFAULT_KEYWORDS = '发语音,说语音,语音回复,用语音,念一下,读出来,发个语音,语音说,发条语音,能语音吗,發語音,語音回覆,用語音,讀出嚟,读出嚟,講語音,讲语音,發條語音,讀出來';
 
@@ -45,6 +46,7 @@ let dataDir = '';
 /** 记住上次哪种投递方式成功过，避免每条都先撞一次失败。 */
 let deliveryMemory = '';
 let state = { lastSaidAt: 0, lastChatKey: '', targets: {} };
+const speechTurns = new WeakMap();
 
 export async function setup(api) {
   cfg = api.config;
@@ -61,7 +63,7 @@ export async function setup(api) {
       '把要说的话合成成一条语音消息发出去，用来代替打字。'
       + '普通话和粤语按文字内容自动切换，也可通过 language 明确指定。'
       + '只在用户明确要求「发语音/念一下/用语音说」时调用；平时不要调。'
-      + '调用它就不要再调 send_message —— 语音回复不需要文字。'
+      + '语音送达后只用 send_message 简短确认，不复述语音内容；发送失败时用文字回复。'
       + '返回第一行是 status：ok=已发出语音 / cooling=刚说过、这次算了 / dry-run=演练，没真发 / error=失败。',
     category: 'media',
     icon: '🔊',
@@ -77,11 +79,8 @@ export async function setup(api) {
     async execute(ctx, args) {
       const text = String(args?.text ?? '').trim();
       try {
-        const result = await doSay(ctx, text, args?.language);
-        if (ctx.session && (result.isError || /^status: (?:error|cooling)/.test(result.content || ''))) ctx.session.ttsTextFallback = true;
-        return result;
+        return await doSay(ctx, text, args?.language);
       } catch (error) {
-        if (ctx.session) ctx.session.ttsTextFallback = true;
         warn(`语音合成异常：${describe(error)}`);
         return fail(`${humanize(error)}。改用 send_message 打字回复吧。`);
       }
@@ -123,13 +122,10 @@ export async function setup(api) {
       const text = String(args?.text ?? '').trim();
       const target = String(args?.targetChatKey ?? '').trim();
       try {
-        const result = await doSayTo(ctx, text, target, args?.language);
-        if (ctx.session && (result.isError || /^status: (?:error|cooling)/.test(result.content || ''))) ctx.session.ttsTextFallback = true;
-        return result;
+        return await doSayTo(ctx, text, target, args?.language);
       } catch (error) {
-        if (ctx.session) ctx.session.ttsTextFallback = true;
         warn(`跨会话语音异常：${describe(error)}`);
-        return fail(`跨会话语音失败：${humanize(error)}。改用 send_to 发文字，或在当前会话用 say。`);
+        return fail(`跨会话语音失败：${humanize(error)}。在当前聊天用 send_message 说明未转达。`);
       }
     }
   });
@@ -168,7 +164,7 @@ export function available() {
   return { ok: process.platform === 'win32', reason: process.platform === 'win32' ? '' : '当前离线语音需要 Windows' };
 }
 
-// ── 钩子：关键词注入 + 文字闸门 ──────────────────────────────────────────
+// ── 钩子：语音优先，结果用当前聊天的一句文字确认 ─────────────────────────
 
 export const hooks = {
   /** 命中关键词才注入指令；不命中什么都不做（零成本）。 */
@@ -176,34 +172,39 @@ export const hooks = {
     try {
       // 跨会话分支要看 core 开关，这里保证配置引用已就绪（读不到 = 按关闭处理）
       if (!coreCfgRef) await warmCoreConfig();
-      injectTrigger(payload);
+      const mode = injectTrigger(payload);
+      if (payload.session) {
+        speechTurns.delete(payload.session);
+        if (mode) speechTurns.set(payload.session, { mode });
+      }
     } catch (error) {
       warn(`语音触发判定失败（本次不注入）：${describe(error)}`);
     }
   },
 
-  /**
-   * 语音闸门：本轮是语音模式时，把**文字**发送拦下来。
-   * 没有它的话，模型很可能又打字又发语音，就不是"代替"了。
-   * 判据 = 本轮消息里有没有我们的注入标记（inputMessages 是注入后的快照，
-   * orchestrator.js:876 → 882，写入时机在工具执行之前）。
-   *
-   * 跨会话模式（转达）下额外拦 send_to：同一句话不该又发文字给别人。
-   */
+  'before-followup-message': (payload) => {
+    const mode = injectTrigger({ ...payload, messages: [payload.message] });
+    if (mode && payload.session) speechTurns.set(payload.session, { mode });
+  },
+
   'before-tool': async (payload) => {
-    try {
-      const name = payload?.toolName;
-      if (name !== 'send_message' && name !== 'send_to') return;   // 只拦文字发送
-      if (payload?.session?.ttsTextFallback) return;
-      if (!voiceModeThisTurn(payload?.session)) return;            // 本轮不是语音模式 → 不碰
-      return {
-        block: true,
-        reason: name === 'send_to'
-          ? '用户要求用语音转达：请改用 tts-say__say_to 把内容念给对方，不要用文字发。'
-          : '用户要求只用语音回复：请立刻改用 say 工具把刚才要说的内容念出来，不要发文字。'
-      };
-    } catch (error) {
-      warn(`语音闸门异常（本次不拦）：${describe(error)}`);
+    const turn = speechTurns.get(payload?.session);
+    if (!turn) return;
+    if (payload.toolName === 'send_to') {
+      return { block: true, reason: '本轮用户要求语音，不要用文字转发给其他会话。' };
+    }
+    if (payload.toolName !== 'send_message' || turn.mode === 'crossDisabled' || payload.deliveryOnly) return;
+    if (turn.attempt && turn.attempt.version === payload.modelVersion) return;
+    return { block: true, reason: turn.mode === 'cross'
+      ? '先用 tts-say__say_to 转达语音，再在当前聊天用 send_message 简短反馈结果。'
+      : '先用 tts-say__say 发送语音，再用 send_message 简短确认；语音失败时用文字回复。' };
+  },
+
+  'after-tool': ({ session, toolName, modelVersion }) => {
+    const turn = speechTurns.get(session);
+    if (!turn) return;
+    if ((turn.mode === 'local' && toolName === 'tts-say__say') || (turn.mode === 'cross' && toolName === 'tts-say__say_to')) {
+      turn.attempt = { version: modelVersion };
     }
   }
 };
@@ -235,31 +236,22 @@ function injectTrigger(payload) {
     if (!gate.open) {
       msg.content = `${msg.content}\n\n${CROSS_TAG}用户要求「${hit}」并想转达给「${to}」，但跨会话语音当前未开启`
         + '（需要「设置 → 工具与技能」的「允许跨会话发送」和本技能的「跨会话语音」两个开关都打开）。'
-        + '请直接告诉用户这个功能没开，不要发送任何内容。';
-      return;
+        + '用 send_message 在当前聊天说明未转达，不要发送到目标聊天。';
+      return 'crossDisabled';
     }
     msg.content = `${msg.content}\n\n${CROSS_TAG}用户要求用语音转达（触发词「${hit}」+ 转达词「${to}」）：`
       + '① 先用 get_chats 查清楚目标会话的 chatKey（group:群号 / private:QQ号，不要自己编）；'
       + '② 再调用 tts-say__say_to，把要说的话原样放进 text、目标放进 targetChatKey；'
       + `③ 目标必须在白名单内，且本轮最多 ${s.crossMaxPerRun} 条、同一目标 ${s.crossCooldownSec} 秒内不重复。`
-      + '④ 不要用 send_message / send_to 发文字（会被拦），转达完就结束这一轮。' + languageHint;
-    return;
+      + '④ 用 send_message 在当前聊天简短反馈结果；不要另发文字到目标聊天。' + languageHint;
+    return 'cross';
   }
 
   msg.content = `${msg.content}\n\n${INJECT_TAG}用户明确要求「${hit}」，这一轮改用语音回复：`
     + '调用 tts-say__say，把你要说的话**原样**放进 text 参数念出来。'
-    + '三条硬规矩：① 不要调用 send_message（不要打字）；② 一次只发一条，别拆成多条；'
-    + '③ 念完不要再调其它工具，直接结束。'
+    + '语音只发一条。成功后用 send_message 简短确认，不复述语音；未发送成功则用文字回复。'
     + `（若用户是在提问，先想好答案再念，念的就是答案本身。语音上限 ${s.maxChars} 字 / 约 ${s.maxSeconds} 秒，超了会自动截断。）` + languageHint;
-}
-
-/** 本轮是不是语音模式（当前会话或跨会话转达都算）。字段缺失返回 false = 放行。 */
-function voiceModeThisTurn(session) {
-  const list = session?.inputMessages;
-  if (!Array.isArray(list) || !list.length) return false;
-  const last = list[list.length - 1];
-  if (typeof last?.content !== 'string') return false;
-  return last.content.includes(INJECT_TAG) || last.content.includes(CROSS_TAG);
+  return 'local';
 }
 
 function currentInputTail(content) {
@@ -315,6 +307,7 @@ function speechSettings(ctx, text, language) {
 // ── 主流程 ────────────────────────────────────────────────────────────────
 
 async function doSay(ctx, text, language) {
+  ctx.signal?.throwIfAborted();
   const s = speechSettings(ctx, text, language);
   await loadState();
 
@@ -339,7 +332,7 @@ async function doSay(ctx, text, language) {
 
   let audio;
   try {
-    audio = await synthesize(spoken, s);
+    audio = await interruptible(ctx.signal, () => synthesize(spoken, s, ctx.signal));
   } catch (error) {
     log(`合成失败：${describe(error)}`);
     return fail(`${synthFailMessage(s, error)}。改用 send_message 打字回复。`);
@@ -354,9 +347,8 @@ async function doSay(ctx, text, language) {
       + '但**没有发送**。确认音色和内容没问题后，把「演练模式」关掉。');
   }
 
-  let sent;
   try {
-    sent = await deliver(ctx, audio, s, spoken);
+    await deliver(ctx, audio, s, spoken);
   } catch (error) {
     await cleanupFile(audio.file);
     log(`发送失败：${describe(error)}`);
@@ -370,7 +362,7 @@ async function doSay(ctx, text, language) {
   const tail = truncated ? `（原文 ${text.length} 字，已截掉末尾 ${dropped} 字）` : '';
   return tell('ok',
     `已发出语音（${secText} 秒，${audio.engine} / ${audio.voice}${tail}）。`
-    + '接下来什么都别做，直接结束这一轮 —— 不要再补文字。');
+    + '用 send_message 简短确认即可，不要复述语音内容。');
 }
 
 /** 先按设定的投递方式发，失败再退到另一种；把成功的记下来。 */
@@ -458,6 +450,7 @@ function targetAllowed(coreCfg, targetChatKey) {
  * （开关 → 格式 → 非当前会话 → 白名单），再加本技能两道：单轮配额、目标冷却。
  */
 async function doSayTo(ctx, text, targetChatKey, language) {
+  ctx.signal?.throwIfAborted();
   const s = speechSettings(ctx, text, language);
   await loadState();
   await warmCoreConfig();
@@ -500,7 +493,7 @@ async function doSayTo(ctx, text, targetChatKey, language) {
 
   let audio;
   try {
-    audio = await synthesize(spoken, s);
+    audio = await interruptible(ctx.signal, () => synthesize(spoken, s, ctx.signal));
   } catch (error) {
     log(`跨会话合成失败：${describe(error)}`);
     return fail(`${synthFailMessage(s, error)}。`);
@@ -525,31 +518,31 @@ async function doSayTo(ctx, text, targetChatKey, language) {
 
   ctx.ttsCrossState.sent += 1;
   markTargetSaid(targetChatKey);
-  // 跨会话发送必须手动留档：收尾状态判的是 session.sent.length
-  // （orchestrator.js:1259），不记就会被算成 noreply，UI 会话卡片也不显示。
+  // 兼容不会自动留档的宿主；跨会话语音不能算作当前聊天的文字回执。
   if (!ctx.sender.recordsDeliveries && Array.isArray(ctx.session?.sent)) {
-    ctx.session.sent.push({ type: 'text', text: '[语音]', to: targetChatKey });
+    ctx.session.sent.push({ type: 'record', text: '[语音]', to: targetChatKey });
     try { ctx.emit?.('session-update', ctx.session.id); } catch { /* 通知失败不影响发送结果 */ }
   }
 
   const tail = truncated ? `（原文 ${text.length} 字，已截掉末尾 ${dropped} 字）` : '';
-  return tell('ok', `已把语音发到 ${targetChatKey}（${secText} 秒，${audio.engine} / ${audio.voice}${tail}）。不要再补文字，直接结束。`);
+  return tell('ok', `已把语音发到 ${targetChatKey}（${secText} 秒，${audio.engine} / ${audio.voice}${tail}）。在当前聊天用 send_message 简短确认，不要把文字发给目标。`);
 }
 
 // ── 合成 ──────────────────────────────────────────────────────────────────
 
-async function synthesize(text, s) {
+async function synthesize(text, s, signal) {
+  signal?.throwIfAborted();
   const out = await ensureCacheDir();
   const wav = out + '/tts-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '.wav';
   try {
     if (s.engine === 'kokoro') {
       // Serialize model loads to bound CPU/RAM use when several chats request speech.
-      const job = neuralQueue.then(() => runNeural(text, s, wav));
+      const job = neuralQueue.then(() => runNeural(text, s, wav, signal));
       neuralQueue = job.catch(() => {});
       await job;
     } else {
       if (s.language === 'yue') throw new Error('Windows SAPI 未配置粤语音色；请选本地神经语音引擎');
-      await runSapi(text, s, wav);
+      await runSapi(text, s, wav, signal);
       await assertNotSilent(wav, text, s, BYTES_PER_SEC.sapi);
     }
     if (!(await fileOk(wav, 1024))) throw new Error('离线合成没有产出音频');
@@ -558,7 +551,8 @@ async function synthesize(text, s) {
   } catch (error) { await cleanupFile(wav); throw error; }
 }
 
-async function runNeural(text, s, outFile) {
+async function runNeural(text, s, outFile, signal) {
+  signal?.throwIfAborted();
   const cantonese = s.language === 'yue';
   const engine = cantonese ? 'vits-cantonese' : 'kokoro';
   const voice = cantonese ? 'xiaomaiiwn' : s.neuralVoice;
@@ -581,7 +575,7 @@ async function runNeural(text, s, outFile) {
       volume: s.volume, threads: s.neuralThreads,
     }), { encoding: 'utf8', flag: 'wx' });
     const script = fileURLToPath(new URL(cantonese ? './cantonese_synth.py' : './kokoro_synth.py', import.meta.url));
-    const result = await runProcess(python, ['-I', '-X', 'utf8', script, '--request', requestFile, '--deny-network'], 90000);
+    const result = await runProcess(python, ['-I', '-X', 'utf8', script, '--request', requestFile, '--deny-network'], 90000, { signal });
     if (result.code !== 0) {
       warn(`${engine} 本地合成失败：${String(result.stderr).trim().slice(-1200)}`);
       throw new Error('本地神经语音合成失败，请检查本地运行日志');
@@ -608,7 +602,8 @@ async function doListVoices() {
   return tell('ok', '本机离线音色：\n' + voices.join('\n') + '\n当前：' + readSettings().voice);
 }
 
-async function runSapi(text, s, outFile) {
+async function runSapi(text, s, outFile, signal) {
+  signal?.throwIfAborted();
   const q = (v) => `'${String(v).replace(/'/g, "''")}'`;
   // ⚠️ 这里必须自己 try/catch + exit 1：**PowerShell 遇到方法调用异常时退出码仍是 0**
   // （实测 SelectVoice 音色不存在 → 退出码 0，而且照样写出一个 59KB 的空 wav）。
@@ -636,7 +631,7 @@ async function runSapi(text, s, outFile) {
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   const { code, stderr, stdout } = await runProcess('powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-    SYNTH_TIMEOUT_MS);
+    SYNTH_TIMEOUT_MS, { signal });
 
   if (code !== 0) {
     const err = String(stderr || stdout || '').trim();
@@ -663,6 +658,7 @@ async function listSapiVoices() {
 // ESM 里没有 require，child_process 只能动态 import；
 // 模块有缓存，每次 await 一次几乎零开销，换来的是"不碰核心、不引第三方依赖"。
 async function runProcess(cmd, args, timeoutMs = 20000, opts = {}) {
+  opts.signal?.throwIfAborted();
   let spawn;
   try {
     const cp = await import('node:child_process');
@@ -670,6 +666,7 @@ async function runProcess(cmd, args, timeoutMs = 20000, opts = {}) {
   } catch (error) {
     throw new Error(`拿不到子进程模块：${error?.message || error}`);
   }
+  opts.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     let child;
     try {
@@ -691,6 +688,7 @@ async function runProcess(cmd, args, timeoutMs = 20000, opts = {}) {
     child.stderr?.on('data', (d) => { stderr += d.toString(); });
     child.on('error', (error) => {
       if (done) return;
+      if (opts.signal?.aborted) return; // Wait for exit before removing temporary audio.
       done = true;
       clearTimeout(timer);
       reject(new Error(`启动 ${cmd} 失败：${error?.message || error}`));
@@ -699,6 +697,7 @@ async function runProcess(cmd, args, timeoutMs = 20000, opts = {}) {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (opts.signal?.aborted) { reject(opts.signal.reason); return; }
       resolve({ code, stdout, stderr });
     });
   });

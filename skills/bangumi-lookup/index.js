@@ -117,10 +117,12 @@ const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(Number(n) || l
 let lastRequestAt = 0;
 let queue = Promise.resolve();
 
-function enqueue(fn) {
+function enqueue(fn, signal) {
   const run = queue.then(async () => {
+    signal?.throwIfAborted();
     const gap = Math.max(0, intervalMs() - (Date.now() - lastRequestAt));
     if (gap) await sleep(gap);
+    signal?.throwIfAborted();
     lastRequestAt = Date.now();
     return fn();
   });
@@ -196,7 +198,8 @@ function isBaseFailure(e) {
 }
 
 /** 往一个指定的源打一条请求（不含换源逻辑） */
-async function requestOnce(base, pathname, { method = 'GET', body = null } = {}) {
+async function requestOnce(base, pathname, { method = 'GET', body = null, signal } = {}) {
+  signal?.throwIfAborted();
   if (typeof doFetch !== 'function') {
     throw new Error('本技能没有拿到 fetch（清单里缺少 web_fetch 权限）');
   }
@@ -216,7 +219,7 @@ async function requestOnce(base, pathname, { method = 'GET', body = null } = {})
         ...(body ? { 'Content-Type': 'application/json' } : {})
       },
       body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal
+      signal: signal ? AbortSignal.any([signal, ctrl.signal]) : ctrl.signal
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -233,6 +236,7 @@ async function requestOnce(base, pathname, { method = 'GET', body = null } = {})
       throw e;
     }
   } catch (err) {
+    signal?.throwIfAborted();
     if (err?.name === 'AbortError') {
       const e = new Error(`请求超时（${ms}ms）`);
       e.timeout = true;
@@ -246,6 +250,7 @@ async function requestOnce(base, pathname, { method = 'GET', body = null } = {})
 
 /** 挑一个能用的源把这条请求发出去；业务错误原样抛（换源没用） */
 async function withBase(pathname, opts) {
+  opts?.signal?.throwIfAborted();
   const all = orderedBases();
   const live = all.filter((x) => x.forced || !isDead(x.base));
   const tries = live.length ? live : all.slice(0, 1);   // 全在冷却期也得试一个，否则永远起不来
@@ -255,11 +260,12 @@ async function withBase(pathname, opts) {
     tried.push(hostOf(base));
     try {
       // 限频放在**每次真实网络调用**上，而不是每次逻辑查询上
-      const data = await enqueue(() => requestOnce(base, pathname, opts));
+      const data = await enqueue(() => requestOnce(base, pathname, opts), opts?.signal);
       activeBase = base;
       baseDeadUntil.delete(base);
       return { data, base };
     } catch (e) {
+      opts?.signal?.throwIfAborted();
       lastErr = e;
       if (/web_fetch|没有拿到 fetch/.test(String(e?.message || ''))) throw e;   // 缺权限，换源无意义
       if (!isBaseFailure(e)) throw e;                                          // 业务错误：别浪费时间换源
@@ -276,13 +282,14 @@ async function withBase(pathname, opts) {
  * 打一个 Bangumi 接口。返回 { data, cached }。
  * 抛错时带上 .status / .timeout，方便上面区分"被限流"和"网络不通"。
  */
-async function fetchJson(pathname, { method = 'GET', body = null, ttl = 0, cacheKey = null } = {}) {
+async function fetchJson(pathname, { method = 'GET', body = null, ttl = 0, cacheKey = null, signal } = {}) {
+  signal?.throwIfAborted();
   const key = cacheKey || `${method} ${pathname}`;
   if (ttl) {
     const hit = cacheGet(key);
     if (hit) return { data: hit, cached: true };
   }
-  const { data } = await withBase(pathname, { method, body });
+  const { data } = await withBase(pathname, { method, body, signal });
   if (ttl) cacheSet(key, data, ttl);
   return { data, cached: false };
 }
@@ -304,11 +311,12 @@ function resolveType(raw, fallback = 2) {
  */
 let lastSearchError = null;
 
-async function searchSubjects(keyword, typeNum, limit, allowNsfw) {
+async function searchSubjects(keyword, typeNum, limit, allowNsfw, signal) {
   lastSearchError = null;
   try {
     const { data } = await fetchJson('/v0/search/subjects', {
       method: 'POST',
+      signal,
       body: { keyword, sort: 'match', filter: { type: [typeNum], nsfw: allowNsfw } },
       ttl: TTL.search,
       cacheKey: `s:${typeNum}:${allowNsfw ? 1 : 0}:${keyword}`
@@ -317,12 +325,13 @@ async function searchSubjects(keyword, typeNum, limit, allowNsfw) {
     if (list.length) return { list, total: Number(data?.total) || list.length, via: 'v0' };
     // v0 返回空：不急着落旧版，先看旧版有没有 —— 两边索引覆盖略有差异
   } catch (err) {
+    signal?.throwIfAborted();
     lastSearchError = err;
   }
   try {
     const { data } = await fetchJson(
       `/search/subject/${encodeURIComponent(keyword)}?type=${typeNum}&responseGroup=large&max_results=${limit}`,
-      { ttl: TTL.search, cacheKey: `s0:${typeNum}:${keyword}` }
+      { ttl: TTL.search, cacheKey: `s0:${typeNum}:${keyword}`, signal }
     );
     const raw = Array.isArray(data?.list) ? data.list : [];
     const list = allowNsfw ? raw : raw.filter((x) => x?.nsfw !== true);
@@ -333,12 +342,13 @@ async function searchSubjects(keyword, typeNum, limit, allowNsfw) {
   }
 }
 
-async function searchByKind(kind, keyword, limit, allowNsfw) {
+async function searchByKind(kind, keyword, limit, allowNsfw, signal) {
   const path = kind === 'character' ? '/v0/search/characters'
     : (kind === 'person' ? '/v0/search/persons' : null);
   if (!path) throw new Error(`不认识的 kind：${kind}`);
   const { data } = await fetchJson(path, {
     method: 'POST',
+    signal,
     body: { keyword, filter: { nsfw: allowNsfw } },
     ttl: TTL.search,
     cacheKey: `k:${kind}:${allowNsfw ? 1 : 0}:${keyword}`
@@ -346,15 +356,16 @@ async function searchByKind(kind, keyword, limit, allowNsfw) {
   return Array.isArray(data?.data) ? data.data : [];
 }
 
-const getSubject = (id) => fetchJson(`/v0/subjects/${id}`, { ttl: TTL.detail, cacheKey: `d:${id}` }).then((r) => r.data);
-const getStaff = (id) => fetchJson(`/v0/subjects/${id}/persons`, { ttl: TTL.staff, cacheKey: `p:${id}` }).then((r) => r.data);
-const getCast = (id) => fetchJson(`/v0/subjects/${id}/characters`, { ttl: TTL.staff, cacheKey: `c:${id}` }).then((r) => r.data);
-const getCalendar = () => fetchJson('/calendar', { ttl: TTL.calendar, cacheKey: 'cal' }).then((r) => r.data);
+const getSubject = (id, signal) => fetchJson(`/v0/subjects/${id}`, { ttl: TTL.detail, cacheKey: `d:${id}`, signal }).then((r) => r.data);
+const getStaff = (id, signal) => fetchJson(`/v0/subjects/${id}/persons`, { ttl: TTL.staff, cacheKey: `p:${id}`, signal }).then((r) => r.data);
+const getCast = (id, signal) => fetchJson(`/v0/subjects/${id}/characters`, { ttl: TTL.staff, cacheKey: `c:${id}`, signal }).then((r) => r.data);
+const getCalendar = (signal) => fetchJson('/calendar', { ttl: TTL.calendar, cacheKey: 'cal', signal }).then((r) => r.data);
 
-async function getEpisodes(subjectId, typeNum, limit, offset) {
+async function getEpisodes(subjectId, typeNum, limit, offset, signal) {
   const q = new URLSearchParams({ subject_id: String(subjectId), limit: String(limit), offset: String(offset) });
   if (typeNum !== null) q.set('type', String(typeNum));
   const { data } = await fetchJson(`/v0/episodes?${q.toString()}`, {
+    signal,
     ttl: TTL.episodes,
     cacheKey: `e:${subjectId}:${typeNum}:${limit}:${offset}`
   });
@@ -569,7 +580,7 @@ export function setup(api) {
       },
       required: ['keyword']
     },
-    async execute(_ctx, args) {
+    async execute(ctx, args) {
       const c = cfg() || {};
       const keyword = clean(args?.keyword);
       if (!keyword) return err('缺少 keyword：告诉我要搜什么。');
@@ -583,7 +594,7 @@ export function setup(api) {
       try {
         if (kind === 'subject') {
           const typeNum = resolveType(args?.type, 2);
-          const { list, total, via } = await searchSubjects(keyword, typeNum, limit, allowNsfw);
+          const { list, total, via } = await searchSubjects(keyword, typeNum, limit, allowNsfw, ctx?.signal);
           const normalized = (Array.isArray(list) ? list : []).map(normSubject).filter((s) => s && s.id);
           const items = (allowNsfw ? normalized : normalized.filter((s) => !s.nsfw)).slice(0, limit);
           // 过滤掉了几条要说清楚：否则"匹配 5 条、只列 3 条"看起来像工具出错了
@@ -605,7 +616,7 @@ export function setup(api) {
           };
         }
 
-        const list = await searchByKind(kind, keyword, limit, allowNsfw);
+        const list = await searchByKind(kind, keyword, limit, allowNsfw, ctx?.signal);
         if (!list.length) {
           return { content: `Bangumi 里没搜到「${keyword}」这个${kind === 'character' ? '角色' : '人物'}。${NO_HIT}` };
         }
@@ -649,7 +660,7 @@ export function setup(api) {
       },
       required: ['id']
     },
-    async execute(_ctx, args) {
+    async execute(ctx, args) {
       const raw = String(args?.id ?? '').trim();
       if (!/^\d+$/.test(raw)) {
         return err(`id 必须是数字（拿到的是「${raw || '空'}」）。id 要从 search 工具的结果里原样取，不能自己编。`);
@@ -660,6 +671,7 @@ export function setup(api) {
       try {
         if (kind === 'character' || kind === 'person') {
           const d = await fetchJson(`/v0/${kind === 'character' ? 'characters' : 'persons'}/${id}`, {
+            signal: ctx?.signal,
             ttl: TTL.detail,
             cacheKey: `x:${kind}:${id}`
           }).then((r) => r.data);
@@ -673,7 +685,7 @@ export function setup(api) {
           return { content: out.join('\n') };
         }
 
-        const d = await getSubject(id);
+        const d = await getSubject(id, ctx?.signal);
         if (!d || !clean(d.name)) {
           return { content: `Bangumi 上没有 id=${id} 的条目（id 可能填错了）。${NO_HIT}` };
         }
@@ -682,16 +694,16 @@ export function setup(api) {
         // 制作阵容：单独一个接口，失败不该拖垮整条详情
         if (args?.staff !== false) {
           try {
-            const lines = fmtStaff(asList(await getStaff(id)));
+            const lines = fmtStaff(asList(await getStaff(id, ctx?.signal)));
             if (lines.length) blocks.push(`主要制作阵容：\n${lines.join('\n')}`);
-          } catch { /* 缺阵容不算失败 */ }
+          } catch { ctx?.signal?.throwIfAborted(); /* 缺阵容不算失败 */ }
         }
         // 声优表：只有明确要才拉，省一次请求
         if (args?.characters === true) {
           try {
-            const lines = fmtCast(asList(await getCast(id)));
+            const lines = fmtCast(asList(await getCast(id, ctx?.signal)));
             if (lines.length) blocks.push(`登场角色与声优：\n${lines.join('\n')}`);
-          } catch { /* 缺声优表不算失败 */ }
+          } catch { ctx?.signal?.throwIfAborted(); /* 缺声优表不算失败 */ }
         }
 
         blocks.push('（用你自己的话讲给群里，挑群友问的那几个点说；'
@@ -719,7 +731,7 @@ export function setup(api) {
       },
       required: ['subjectId']
     },
-    async execute(_ctx, args) {
+    async execute(ctx, args) {
       const raw = String(args?.subjectId ?? '').trim();
       if (!/^\d+$/.test(raw)) {
         return err(`subjectId 必须是数字（拿到的是「${raw || '空'}」）。它要从 search 工具的结果里取。`);
@@ -730,7 +742,7 @@ export function setup(api) {
       const limit = clamp(Number(args?.limit) || 12, 1, 30);
 
       try {
-        const { list, total } = await getEpisodes(subjectId, t, 100, 0);
+        const { list, total } = await getEpisodes(subjectId, t, 100, 0, ctx?.signal);
         const all = Array.isArray(list) ? list : [];
         if (!all.length) {
           return { content: `Bangumi 上没有 id=${subjectId} 的剧集记录（可能填错了 id，或者这部还没登记集数）。${NO_HIT}` };
@@ -778,7 +790,7 @@ export function setup(api) {
         limit: { type: 'number', description: '最多列几部，1~30，默认 15。' }
       }
     },
-    async execute(_ctx, args) {
+    async execute(ctx, args) {
       const c = cfg() || {};
       const limit = clamp(Number(args?.limit) || 15, 1, 30);
       const CN = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -799,7 +811,7 @@ export function setup(api) {
       }
 
       try {
-        const cal = await getCalendar();
+        const cal = await getCalendar(ctx?.signal);
         const day = Array.isArray(cal) ? cal[idx] : null;
         const items = Array.isArray(day?.items) ? day.items : [];
         const allowNsfw = c.allowNsfw === true;

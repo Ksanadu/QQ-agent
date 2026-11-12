@@ -67,7 +67,11 @@ export function registerChatFeatureTools() {
       from: { type: 'string', description: 'YYYY-MM-DD 或含时区的 ISO 时间' }, to: { type: 'string' },
       imagesOnly: { type: 'boolean' }, limit: { type: 'integer' }, offset: { type: 'integer' }
     }, required: ['query'] },
-    async execute(ctx, args) { try { return ok(ctx.store.search(ctx.chatKey, args)); } catch (e) { return fail(e); } }
+    async execute(ctx, args) { try {
+      const result = ctx.store.search(ctx.chatKey, args);
+      ctx.trackMessages?.(result.messages);
+      return ok(result);
+    } catch (e) { return fail(e); } }
   });
   registerTool({
     id: 'set_task_context', name: '保存当前任务对象', category: 'query',
@@ -79,7 +83,8 @@ export function registerChatFeatureTools() {
       if (!actors.includes(actor)) throw new Error('请指定本轮真实请求者的 QQ 号，不能修改其他人的任务');
       if (!ctx.tasks) throw new Error('连续任务存储不可用');
       if (!Array.isArray(args.messageIds) || args.messageIds.length > 12) throw new Error('任务对象最多 12 条');
-      const saved = ctx.tasks.save(ctx.chatKey, actor, args.summary, args.messageIds, ctx.store);
+      const saved = ctx.tasks.save(ctx.chatKey, actor, args.summary, args.messageIds, ctx.store,
+        ctx.triggerEntries.flatMap(m => [m.mid, m.reply?.messageId]));
       ctx.taskContextExplicit = true; return ok(saved);
     } catch (e) { return fail(e); } }
   });

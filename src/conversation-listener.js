@@ -1,4 +1,5 @@
 import { Worker } from 'node:worker_threads';
+import { messageDependencyIds } from './chat-visibility.js';
 
 export function listenerMessage(m) {
   return { id: m.id, messageId: m.mid, ts: m.ts, senderId: m.senderId, sender: m.self ? '机器人' : m.senderName,
@@ -16,7 +17,7 @@ export class ConversationListeners {
     const until = Date.now() + idleMs;
     const batchDelayMs = normalizeListenerDelayMs(config.conversationListener?.batchDelayMs, 400);
     const worker = new Worker(new URL('./conversation-listener-worker.js', import.meta.url), { workerData: { config, anchor: anchor.map(listenerMessage), idleMs, until, batchDelayMs } });
-    const state = { worker, parentSessionId, until, checked: 0, seen: new Set() };
+    const state = { worker, parentSessionId, until, checked: 0, seen: new Map(), anchorMids: new Set(anchor.flatMap(messageDependencyIds)) };
     this.tasks.set(chatKey, state);
     const close = reason => {
       if (this.tasks.get(chatKey) !== state) return;
@@ -39,9 +40,15 @@ export class ConversationListeners {
   feed(chatKey, entry) {
     const task = this.tasks.get(chatKey);
     if (!task || !entry || entry.self || entry.recalled || task.seen.has(entry.id)) return false;
-    task.seen.add(entry.id);
-    if (task.seen.size > 1000) task.seen.delete(task.seen.values().next().value);
+    task.seen.set(entry.id, messageDependencyIds(entry));
+    if (task.seen.size > 1000) task.seen.delete(task.seen.keys().next().value);
     task.worker.postMessage({ type: 'entry', entry: listenerMessage(entry) }); return true;
+  }
+  recall(chatKey, mid) {
+    const task = this.tasks.get(chatKey);
+    if (task && (task.anchorMids.has(mid) || [...task.seen.values()].some(ids => ids.includes(mid)))) {
+      this.stop(chatKey, '监听材料已撤回，已取消原判定');
+    }
   }
   stop(chatKey, reason = '监听已停止') { this.tasks.get(chatKey)?.close(reason); }
   stopAll() { for (const key of [...this.tasks.keys()]) this.stop(key); }

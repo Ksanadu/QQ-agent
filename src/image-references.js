@@ -77,10 +77,14 @@ async function loadOneImage(source, onebot, signal, download) {
   throw failure('参考图读取失败或链接已过期，请重新发送图片。');
 }
 
-export async function loadImageReferences({ command, chatKey, onebot, knownMessage, signal, download = safeFetchBinary }) {
+export async function loadImageReferences({ command, chatKey, onebot, knownMessage, isRecalled, signal, download = safeFetchBinary }) {
+  const checkReference = () => {
+    if (command.replyId != null && isRecalled?.(command.replyId)) throw failure('参考消息已撤回，请重新发送图片。');
+  };
   let sources = [...(command.images || [])];
   if (command.replyId != null) {
     signal?.throwIfAborted();
+    checkReference();
     const known = knownMessage?.(command.replyId);
     let message;
     try { message = await onebot.getMsg(command.replyId); }
@@ -89,6 +93,7 @@ export async function loadImageReferences({ command, chatKey, onebot, knownMessa
       message = {}; // Local history already binds this message ID to the current chat.
     }
     signal?.throwIfAborted();
+    checkReference();
     assertReplyScope(message, chatKey, onebot.selfId, Boolean(known));
     let quoted = imageSourcesFromMessage(message?.message ?? message?.raw_message);
     if (!quoted.length && known) quoted = (known.media || []).filter((m) => m.kind === 'image').map(({ file, url }) => ({ file, url }));
@@ -109,5 +114,6 @@ export async function loadImageReferences({ command, chatKey, onebot, knownMessa
     images.push({ buffer, ...type });
   }
   signal?.throwIfAborted();
+  checkReference();
   return images;
 }

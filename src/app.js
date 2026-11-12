@@ -386,11 +386,12 @@ export function createApp({ log = console.log } = {}) {
     // 说明：这里曾经先走一个进程内事件总线（createEventBus），但全项目**没有任何订阅者**，
     // 属于纯空转；更糟的是它给人"存在进程内订阅者"的错觉。真正的消费者只有 SSE。
     let line = null;
-    if (type === 'session-update' && payload?.sessionId) {
+    const sessionId = typeof payload === 'string' ? payload : payload?.sessionId;
+    if (type === 'session-update' && sessionId) {
       try {
         // peek：只序列化、不修改，不需要 get() 那份全量 structuredClone
         // （运行中的会话每次更新都广播，克隆大会话会拖慢事件投递）
-        const s = sessions?.peek(payload.sessionId);
+        const s = sessions?.peek(sessionId);
         if (s) {
           line = `event: ${type}\ndata: ${JSON.stringify({
             sessionId: s.id,
@@ -639,6 +640,7 @@ export function createApp({ log = console.log } = {}) {
       emit('chat-update', chatKey);
       const canSend = () => {
         const fresh = getConfig();
+        if (entry.recalled || store.isRecalled(chatKey, imageCommand.replyId)) return false;
         if (orchestrator.paused || orchestrator.aborted || !allowed(kind, id, fresh) || isGloballyBlocked(imageCommand.actorId)) return false;
         if (kind === 'group' && (fresh.blocklist?.[id] || []).map(String).includes(imageCommand.actorId)) return false;
         if (!skillManager.hasCapability(capability)) return false;
@@ -653,6 +655,7 @@ export function createApp({ log = console.log } = {}) {
         providers: skillManager.getCapabilityProviders(capability, { chatKey, kind }),
         ctx: { chatKey, kind, sender, canSend,
           loadImageReferences: (signal) => loadImageReferences({ command: imageCommand, chatKey, onebot, signal,
+            isRecalled: mid => store.isRecalled(chatKey, mid),
             knownMessage: (mid) => store.recent(chatKey, { limit: 500 }).find((m) => String(m.mid) === String(mid))
           })
         }, log
@@ -739,6 +742,7 @@ export function createApp({ log = console.log } = {}) {
     emit('chat-update', `${kind}:${id}`);
     // 逐条触发判定：把刚入库的条目交给编排器（entry 让它能精确标这一条已读）
     orchestrator.onIncoming(`${kind}:${id}`, entry, receivedAt, reservation);
+    if (entry.recalled) return;
 
     // 链接媒体转发（确定性）：刻意不 await —— 百兆级下载/上传不能卡住 ingest 热路径。
     // 内部已把错误全部收口（含 provider 抛错），这里再挂一次 catch 只为防漏网。
@@ -949,6 +953,7 @@ export function createApp({ log = console.log } = {}) {
     if (mid == null) return;
     const marked = store.markRecalled(chatKey, mid);
     if (marked) {
+      orchestrator.onMessageRecalled(chatKey, mid);
       log(`[撤回] ${chatKey} 消息 #${mid} 已被撤回，后续不再发给模型`);
       emit('chat-update', chatKey);
     }

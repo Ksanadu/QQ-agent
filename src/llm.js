@@ -229,6 +229,7 @@ export async function chatCompletionWithRetry(args, retries = 2) {
         r._usedApi = overrides ?? getConfig().api;
         return r;
       } catch (error) {
+        args.signal?.throwIfAborted();
         lastError = error;
         if (attempt >= retries || !isRetryableError(error)) break;   // 换下一个候选模型
         const wait = 1000 * Math.pow(2, attempt);   // 1s, 2s
@@ -364,18 +365,16 @@ export async function chatCompletion({ messages, tools = null, toolChoice = 'aut
   const controller = new AbortController();
   const timeoutMs = Math.max(5000, Number(api.timeoutMs) || 180000);
   const timer = setTimeout(() => controller.abort(new Error('请求超时')), timeoutMs);
-  if (signal) {
-    if (signal.aborted) controller.abort(signal.reason ?? new Error('aborted'));
-    else signal.addEventListener('abort', () => controller.abort(signal.reason ?? new Error('aborted')), { once: true });
-  }
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 
   /** 发一次请求。返回 { ok, status, text, headers }，网络层错误直接抛。 */
   const post = async (body) => {
+    requestSignal.throwIfAborted();
     const res = await fetch(joinUrl(api.baseUrl, '/chat/completions'), {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(api.apiKey, api.baseUrl, api.model) },
       body: JSON.stringify(body),
-      signal: controller.signal
+      signal: requestSignal
     });
     const text = await res.text().catch(() => '');
     return { ok: res.ok, status: res.status, text, contentType: res.headers.get('content-type') || '' };

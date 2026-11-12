@@ -5,6 +5,9 @@ import { transcribeQQVoice } from './qq-speech.js';
 import { sanitizeUserText, escapeCqText } from './util.js';
 import { skillManager } from './skills/manager.js';
 import { DeliveryVerifier } from './delivery-verification.js';
+import { replyPreview } from './chat-visibility.js';
+import { DeliveryUnconfirmedError, hasMessageId } from './text-delivery.js';
+import { withTimeout } from './run-signal.js';
 
 const RECONNECT_MIN_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
@@ -267,17 +270,20 @@ export class OneBotClient {
     // They are used locally for verification and never added to the HTTP body.
     const proof = delivery.message ? { ...params, message: delivery.message } : params;
     const prepareStarted = performance.now();
+    delivery.signal?.throwIfAborted();
     const attempt = await this.deliveryVerifier.prepare(action, proof, this.selfId,
-      (name, args, limit) => this.#callHttp(name, args, limit));
+      (name, args, limit, signal) => this.#callHttp(name, args, limit, { signal }), { signal: delivery.signal });
     delivery.onTiming?.('sendPrepareMs', Math.round(performance.now() - prepareStarted));
     if (delivery.waitBeforeSend) await delivery.waitBeforeSend();
     delivery.beforeSend?.(); // Recheck cancellation, permissions and version after the async snapshot.
     const sendStarted = performance.now();
     try {
-      return await this.#callHttp(action, params, timeoutMs);
+      // Once dispatched, keep the send and its verification alive. Only
+      // read requests and pre-send preparation use the session abort signal.
+      return await this.#callHttp(action, params, timeoutMs, { requireMessageId: delivery.requireMessageId, signal: delivery.querySignal });
     } catch (error) {
       const receipt = await this.deliveryVerifier.recover(attempt);
-      if (!receipt) throw error;
+      if (!receipt || (delivery.requireMessageId && !hasMessageId(receipt.message_id))) throw error;
       console.warn(`[onebot] ${action} 返回失败，但已核实送达${receipt.message_id != null ? ` #${receipt.message_id}` : ''}；停止重发。原错误：${error.message}`);
       return receipt;
     } finally {
@@ -285,7 +291,7 @@ export class OneBotClient {
     }
   }
 
-  async #callHttp(action, params = {}, timeoutMs = null) {
+  async #callHttp(action, params = {}, timeoutMs = null, { requireMessageId = false, signal } = {}) {
     // ── 超时按 action 分档（这里修过一个真实故障）──────────────────────────
     // 原来一律 15 秒。查询类够用，但**发送类不够**：图片/视频以 base64 或大 body
     // 发出去时，协议端要走完「接收 body → 解码 → 上传腾讯服务器 → 返回」，
@@ -302,14 +308,16 @@ export class OneBotClient {
           ...(this.httpToken ? { authorization: `Bearer ${this.httpToken}` } : {})
         },
         body: JSON.stringify(params),
-        signal: AbortSignal.timeout(limit)
+        signal: withTimeout(signal, limit)
       });
     } catch (error) {
+      signal?.throwIfAborted();
       // fetch 只在网络层失败时抛，且 message 恒为 "fetch failed" —— 丢给上层
       // 只会得到一句没法排查的话。这里把 cause 链挖出来再抛。
       const cause = describeCause(error);
       const aborted = /timeout|abort/i.test(cause) || error?.name === 'TimeoutError' || error?.name === 'AbortError';
-      throw new Error(aborted
+      const Failure = requireMessageId ? DeliveryUnconfirmedError : Error;
+      throw new Failure(aborted
         ? `OneBot ${action} 超时（${Math.round(limit / 1000)} 秒未完成）：${cause}`
         : `OneBot ${action} 请求失败：${cause}`);
     }
@@ -317,9 +325,25 @@ export class OneBotClient {
       const hint = res.status === 426
         ? '（HTTP 426：httpUrl 可能指向了 WebSocket 端口，请检查 snowluma.httpUrl 是否为 OneBot HTTP API 地址）'
         : '';
-      throw new Error(`OneBot ${action} HTTP ${res.status}${hint}`);
+      const Failure = requireMessageId && (res.status >= 500 || res.status === 408) ? DeliveryUnconfirmedError : Error;
+      throw new Failure(`OneBot ${action} HTTP ${res.status}${hint}`);
     }
-    const body = await res.json().catch(() => ({}));
+    const body = (await res.json().catch(() => null)) || {};
+    if (requireMessageId) {
+      const statusOk = body.status === 'ok';
+      const codeOk = body.retcode === 0 || body.retcode === '0';
+      const conflict = body.status != null && body.retcode != null && statusOk !== codeOk;
+      if (conflict || body.status === 'async') {
+        throw new DeliveryUnconfirmedError('OneBot 发送回执未确认（状态与返回码不一致或仍在处理）');
+      }
+      if (statusOk || codeOk) {
+        if (!hasMessageId(body.data?.message_id)) throw new DeliveryUnconfirmedError('OneBot 返回成功但没有有效的 QQ 消息 ID');
+        return body.data;
+      }
+      if (body.status !== 'failed' && !/^-?[1-9]\d*$/.test(String(body.retcode ?? ''))) {
+        throw new DeliveryUnconfirmedError('OneBot 未返回可确认的发送回执');
+      }
+    }
     if (body.status !== 'ok' && body.retcode !== 0) {
       throw new Error(`OneBot ${action} 失败: retcode=${body.retcode ?? body.status} ${body.wording ?? ''}`);
     }
@@ -367,18 +391,19 @@ export class OneBotClient {
     return segments;
   }
 
-  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
+  async sendText(kind, id, text, { replyToMessageId = null, atUserId = null, beforeSend = null, waitBeforeSend = null,
+    onTiming = null, requireMessageId = false, signal } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'text', data: { text: escapeCqText(String(text ?? '')) } });
-    return this.sendSegments(kind, id, segments, { beforeSend, waitBeforeSend, onTiming });
+    return this.sendSegments(kind, id, segments, { beforeSend, waitBeforeSend, onTiming, requireMessageId, signal });
   }
 
-  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
+  async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null, signal } = {}) {
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     // subType=1 请求协议端按"表情样式"渲染（小图气泡）；不支持该字段的实现会忽略它。
     segments.push({ type: 'image', data: { file: String(imageUrl), subType: 1 } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming, signal });
   }
 
   /**
@@ -392,32 +417,33 @@ export class OneBotClient {
    * 段结构与 sendSticker 完全一样（都是 image 段），区别只是语义：
    * 那个是"发表情"，这个是"发一张图"。所以复用同一套 reply/at 处理。
    */
-  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
+  async sendImage(kind, id, fileRef, { replyToMessageId = null, atUserId = null, verificationRef = null, beforeSend = null, waitBeforeSend = null, onTiming = null, signal } = {}) {
     const ref = String(fileRef ?? '').trim();
     if (!ref) throw new Error('图片内容为空');
     const segments = OneBotClient.#replyAtSegments({ replyToMessageId, atUserId });
     segments.push({ type: 'image', data: { file: ref } });
     const proof = verificationRef ? segments.map(s => s.type === 'image' ? { ...s, data: { ...s.data, file: verificationRef } } : s) : null;
-    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming });
+    return this.sendSegments(kind, id, segments, { message: proof, beforeSend, waitBeforeSend, onTiming, signal });
   }
 
-  async sendPoke(kind, id, targetUserId, { beforeSend = null, waitBeforeSend = null, onTiming = null } = {}) {
+  async sendPoke(kind, id, targetUserId, { beforeSend = null, waitBeforeSend = null, onTiming = null, signal } = {}) {
     const params = kind === 'private' ? { user_id: Number(id) } :
       { group_id: Number(id), user_id: Number(targetUserId || id) };
     try {
-      return await this.call(kind === 'private' ? 'friend_poke' : 'group_poke', params, null, { beforeSend, waitBeforeSend, onTiming });
+      return await this.call(kind === 'private' ? 'friend_poke' : 'group_poke', params, null, { beforeSend, waitBeforeSend, onTiming, signal });
     } catch {
       // The fallback must recheck the session/version too.
-      return this.call('send_poke', params, null, { beforeSend, waitBeforeSend, onTiming });
+      signal?.throwIfAborted();
+      return this.call('send_poke', params, null, { beforeSend, waitBeforeSend, onTiming, signal });
     }
   }
 
-  async getMsg(messageId) {
-    return this.call('get_msg', { message_id: Number(messageId) });
+  async getMsg(messageId, { signal } = {}) {
+    return this.call('get_msg', { message_id: Number(messageId) }, null, { querySignal: signal });
   }
 
-  async getGroupInfo(groupId) {
-    return this.call('get_group_info', { group_id: Number(groupId) });
+  async getGroupInfo(groupId, { signal } = {}) {
+    return this.call('get_group_info', { group_id: Number(groupId) }, null, { querySignal: signal });
   }
 
   async getGroupMemberInfo(groupId, userId) {
@@ -537,27 +563,15 @@ export async function segmentsToText(segments, { resolveReply = null, resolveAtN
       case 'file': out.push(`[文件${d.name ?? ''}]`); break;
       case 'reply': {
         if (!includeReply) break;
-        let replyText = '';
         let replyInfo = null;
         const replyId = String(d.id ?? '');
         if (resolveReply) {
           try {
-            const info = await resolveReply(replyId);
-            replyInfo = info;
-            if (info?.sender || info?.text) {
-              // 引用者名字带 QQ 号（与发言人标签同口径）：有 id 才拼，解析不到就不编造
-              const senderLabel = info.senderId
-                ? `${info.sender}(QQ:${info.senderId})`
-                : info.sender;
-              const parts = [];
-              parts.push(`${senderLabel || '消息'} #${replyId}`);
-              if (info.text) parts.push(String(info.text).replace(/\s+/g, ' ').slice(0, 160));
-              replyText = `[引用 ${parts.join('：')}]`;
-            }
+            replyInfo = await resolveReply(replyId);
           } catch { /* 解析失败降级 */ }
         }
         try { onReply?.({ ...replyInfo, messageId: replyId, resolved: replyInfo?.resolved ?? Boolean(replyInfo?.sender || replyInfo?.text) }); } catch { /* metadata must not block rendering */ }
-        out.push(replyText || `[引用 消息 #${replyId}：原文未获取，不要猜测引用对象]`);
+        out.push(replyPreview(replyId, replyInfo));
         break;
       }
       case 'json': out.push(describeJsonCard(d.data)); break;

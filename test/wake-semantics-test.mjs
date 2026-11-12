@@ -1,9 +1,9 @@
-// 触发链路语义回归（2026-09-25 重做后的核心承诺）：
+// 触发链路语义回归（立即思考、延迟发送）：
 //   1. 逐条判定：不触发的消息入库瞬间标已读（"未读一闪即已读"）；
-//   2. 触发消息保持未读并进入倒计时；同一唤醒者续发刷新，其他人不重置；
-//   3. 倒计时结束后触发批（触发消息 + 窗口内追加的）整体成为【本轮输入】，
-//      之前已读的闲聊是【已读信息】——边界恰好落在"触发消息之前"；
-//   4. 4 档下任何消息必触发，聚批/边界语义与 1~3 档完全一致；
+//   2. 召唤立即进入模型，发送前等待；同一唤醒者续发刷新，其他人不重置；
+//   3. 首条请求进入【本轮输入】，唤醒者续发进入【本轮新增消息】；
+//      之前的闲聊是【已读信息】，其他人的新消息不混成唤醒者的请求；
+//   4. 4 档下任何消息必触发，发送等待/边界语义与 1~3 档完全一致；
 //   5. 暂停期间消息不判定不触发（只积压），恢复后走 drainBacklogAfterResume。
 //
 // ⚠️ 全程只用一次 bootApp：同进程里第二次 createApp 会因为模块级单例
@@ -29,14 +29,16 @@ const reply = () => ({ toolCalls: [
   { name: 'finish', args: { summary: '已回复' } }
 ] });
 const env = await bootApp({
-  config: { store: { contextSliderPos: 0, historyCount: 80 }, wakeDelayMs: 400 },
+  config: { store: { contextSliderPos: 0, historyCount: 80 }, wakeDelayMs: 400, drainDelayMs: 200 },
   script: Array.from({ length: 100 }, reply)
 });
 const { app, pushGroupMsg, llm, request } = env;
 const unread = () => app.store.getChatMeta('group:456').unread;
 const llmCount = () => llm.state.requests.length;
 // 等本批会话彻底结束（含 drain 空转），避免场景之间互相污染
-const settle = async () => { await sleep(700); };
+const settle = async () => {
+  await waitFor(() => !app.orchestrator.runningChats.size && !app.orchestrator.pendingWake.size, 8000, '主会话及后续补判定结束');
+};
 
 // ── 场景 A：1 档（仅艾特）──
 await check('A1 不触发的闲聊：当场标已读（零等待、零 LLM）', async () => {
@@ -47,17 +49,20 @@ await check('A1 不触发的闲聊：当场标已读（零等待、零 LLM）', 
   assert.equal(llmCount(), before, '不应产生 LLM 调用');
 });
 
-await check('A2 触发消息（@）：保持未读进倒计时；窗口内其他人的消息不判定不重置', async () => {
+await check('A2 触发消息（@）：立即思考但不抢答；其他人的消息不重置发送期限', async () => {
+  const before = llmCount(), sentBefore = env.onebotHttp.state.sends.length;
   pushGroupMsg(111, '张三', '@覆盖Bot 在吗', 9002);
-  await sleep(80);
-  assert.equal(unread(), 1, '触发消息应保持未读');
+  await waitFor(() => llmCount() > before, 2000, '窗口内已启动模型');
+  const window = app.orchestrator.replyWindows.get('group:456');
+  const deadline = window.deadline;
+  assert.ok(Date.now() < deadline, '模型在发送期限之前已启动');
+  assert.equal(unread(), 0, '已经交给当前运行的请求标已读');
+  assert.equal(env.onebotHttp.state.sends.length, sentBefore, '模型先完成也不能抢答');
   pushGroupMsg(112, '李四', '我也插一句闲聊', 9003);
-  await sleep(80);
-  assert.equal(unread(), 2, '窗口内追加的消息应保持未读（不判定）');
-  // 非唤醒者追加消息不重置倒计时。触发后 ~500ms（400 窗口 + 余量）时
-  // LLM 应已收到请求；若被重置（400ms 从追加起算），此刻必然还没到。
-  await sleep(500 - 160);
-  assert.ok(llmCount() >= 1, `倒计时不应被追加消息重置（期望已发起 LLM 请求，实际 ${llmCount()}）`);
+  await waitFor(() => app.store.findByMid('group:456', 9003));
+  assert.equal(unread(), 1, '其他人的消息仍走独立补判定');
+  assert.equal(window.deadline, deadline, '非唤醒者不刷新期限');
+  assert.equal(llmCount(), before + 1, '普通闲聊不插入当前模型请求');
 });
 
 await check('A3 边界：已读闲聊进【已读信息】，触发批进【本轮输入】', async () => {
@@ -73,7 +78,7 @@ await check('A3 边界：已读闲聊进【已读信息】，触发批进【本�
   assert.ok(pastText.includes('闲聊一句'), '触发前的已读闲聊应在【已读信息】');
   assert.ok(!pastText.includes('在吗'), '触发消息不应出现在【已读信息】');
   assert.ok(wakeText.includes('@覆盖Bot 在吗'), '触发消息应在【本轮输入】');
-  assert.ok(wakeText.includes('我也插一句闲聊'), '窗口内追加的消息应在【本轮输入】');
+  assert.ok(!wakeText.includes('我也插一句闲聊'), '非唤醒者的新闲聊不能混进【本轮输入】');
 });
 await settle();
 
@@ -115,7 +120,7 @@ await settle();
 // ── 场景 D：磁盘遗留的旧积压未读不得混进【本轮输入】──────────────────────
 // 真实事故（2026-09-25）：旧进程攒的 60+ 条积压未读躺在磁盘上，新进程启动后
 // 第一条 @ 触发时 drain 把它们全部吃进触发批 —— 模型看到一大坨"未读信息"。
-// 修复：批边界 = 倒计时起点；更早的旧积压标已读沉入【已读信息】。
+// 批边界 = 首条请求；更早的旧积压闲聊标已读沉入【已读信息】。
 await check('D1 旧积压（未经 onIncoming 的遗留未读）沉入【已读信息】，不进【本轮输入】', async () => {
   // 直接往 store 塞积压未读，绕过 onIncoming（模拟旧进程/停机期间遗留）
   const oldTs = Date.now() - 5 * 60_000;
@@ -127,7 +132,7 @@ await check('D1 旧积压（未经 onIncoming 的遗留未读）沉入【已读�
     });
   }
   assert.equal(unread(), 15, '塞入的旧积压应为未读');
-  // 正常路径触发：@ 消息经过 ingest → onIncoming → 倒计时 → wake
+  // 正常路径触发：@ 消息经过 ingest → onIncoming → 立即 wake
   const before = llmCount();
   pushGroupMsg(111, '张三', '@覆盖Bot 看看这段历史', 31000);
   await waitFor(() => llmCount() > before, 8000, '触发运行');

@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { randInt, createSendChain, formatClockTime } from './util.js';
 import { mdToPlain, splitForQQ } from './md-to-plain.js';
 import { captureReactionTargets, validateMessageReaction } from './message-reactions.js';
+import { DeliveryUnconfirmedError, hasMessageId } from './text-delivery.js';
 
 // 限频回退值统一取自 DEFAULT_CONFIG，杜绝"代码默认 80 / 回退值 8 / UI 回退 8"三处打架。
 const DEFAULT_MAX_PER_MINUTE = DEFAULT_CONFIG.send.maxPerMinute;
@@ -78,6 +79,7 @@ export class SendQueue {
   #guard(chatKey) {
     const session = this.deliveryContext.getStore()?.session;
     if (session?.status && session.status !== 'running') throw new Error('本轮回复已结束或中止，停止发送');
+    if (session?.deliveryUnconfirmed) throw new DeliveryUnconfirmedError('本轮有文字送达未确认，停止继续发送');
     assertDeliveryAllowed(chatKey, getConfig(), this.deliveryContext.getStore()?.session.chatKey || '');
     this.deliveryContext.getStore()?.checkCurrent?.();
   }
@@ -86,6 +88,7 @@ export class SendQueue {
     const context = this.deliveryContext.getStore();
     const timing = context?.session.timing;
     return {
+      signal: context?.signal || options.signal,
       waitBeforeSend: context?.waitBeforeSend,
       beforeSend: () => { this.#guard(chatKey); assertPendingDelivery(options); context?.beforeSend?.(); },
       ...(timing && { onTiming: (phase, ms) => { timing[phase] += ms; } })
@@ -190,14 +193,15 @@ export class SendQueue {
   /**
    * 发送一批文本消息（一条或多条）。
    * options: { replyToMessageId, atUserId, dedupeKey }
-   * 返回 { sent: [{text, messageId}], failed: [{text, error}] }；全部失败时抛错。
+   * returnFailures 保留批次回执和原始分段索引，即使没有一条成功；onlyIndices 用于补发已明确失败的段。
+   * 其余调用者保留“全部失败时抛错”的接口。
    */
   async sendTextBatch(chatKey, messages, options = {}) {
     const [kind, id] = String(chatKey).split(':');
     if (kind !== 'group' && kind !== 'private') throw new Error(`非法会话 key：${chatKey}`);
     const list = Array.isArray(messages) ? messages : [messages];
     if (!list.length) throw new Error('消息列表为空');
-    const hardSplitAt = Number(getConfig().send?.hardSplitAt) || 0;
+    const hardSplitAt = Number(options.hardSplitAt ?? getConfig().send?.hardSplitAt) || 0;
     const parts = [];
     for (const m of list) {
       const plain = mdToPlain(String(m ?? ''));
@@ -211,52 +215,72 @@ export class SendQueue {
     if (!parts.length) throw new Error('消息内容为空');
 
     const chain = this.#chain(chatKey);
-    const promises = [];
+    const attempts = [];
+    let unconfirmed = false;
     for (let i = 0; i < parts.length; i++) {
+      if (options.onlyIndices && !options.onlyIndices.includes(i)) continue;
       const text = parts[i];
       // Explicit command replies are distinct per incoming request, even with identical wording.
       const dedupeText = options.dedupeKey ? `__text__${options.dedupeKey}:${i}:${text}` : text;
       const isLast = i === parts.length - 1;
       const gap = this.#gap(text, isLast);
-      promises.push(chain(async () => {
+      attempts.push({ index: i, promise: chain(async () => {
+        if (unconfirmed) throw new Error('前一段送达未确认，未提交本段');
         this.#guard(chatKey);
         this.#checkRate(chatKey);
         if (gap > 0) await this.#pace(gap);
         // 发送去重：窗口期内 identical 文本跳过（防模型重复调用/超时重试造成的重复发言）
         if (this.#isDuplicate(chatKey, dedupeText)) {
           console.warn(`[sender] 跳过重复消息（${this.#dedupeWindow()}ms 内已发过相同内容）：${String(text).slice(0, 30)}`);
-          return { text, messageId: null, at: formatClockTime(Date.now()), deduped: true };
+          return { index: i, text, messageId: null, at: formatClockTime(Date.now()), deduped: true };
         }
         this.#guard(chatKey);
         assertPendingDelivery(options);
-        const data = await this.onebot.sendText(kind, id, text, {
-          replyToMessageId: i === 0 ? options.replyToMessageId : null, // 引用挂在第一条上：回的就是那条
-          atUserId: i === 0 ? options.atUserId : null,
-          ...this.#deliveryOptions(chatKey, options)
-        });
+        const delivery = this.#deliveryOptions(chatKey, options);
+        const checkReply = () => {
+          if (i === 0 && this.store.isRecalled?.(chatKey, options.replyToMessageId)) throw new Error('引用消息已撤回，请移除引用后重写回复');
+        };
+        checkReply();
+        let data;
+        try {
+          data = await this.onebot.sendText(kind, id, text, {
+            replyToMessageId: i === 0 ? options.replyToMessageId : null,
+            atUserId: i === 0 ? options.atUserId : null,
+            ...delivery, requireMessageId: options.requireMessageId,
+            beforeSend: () => { checkReply(); delivery.beforeSend(); }
+          });
+          if (options.requireMessageId && !hasMessageId(data?.message_id)) throw new DeliveryUnconfirmedError('未取得有效 QQ 消息 ID');
+        } catch (error) {
+          if (error?.code === 'DELIVERY_UNCONFIRMED') unconfirmed = true;
+          throw error;
+        }
         this.#markSent(chatKey, dedupeText);   // 只有 OneBot 成功返回后才记入去重窗口
         const ts = Date.now();
         this.store.appendSelf(chatKey, { text, ts, mid: data?.message_id ?? null });
         this.#recordSent({ chatKey, text, messageId: data?.message_id ?? null });
-        return { text, messageId: data?.message_id ?? null, at: formatClockTime(ts) };
-      }));
+        return { index: i, text, messageId: data?.message_id ?? null, at: formatClockTime(ts) };
+      }) });
     }
 
-    const settled = await Promise.allSettled(promises);
+    const settled = await Promise.allSettled(attempts.map(a => a.promise));
     const sent = [];
     const failed = [];
     for (let i = 0; i < settled.length; i++) {
       const r = settled[i];
+      const { index } = attempts[i];
       if (r.status === 'fulfilled') sent.push(r.value);
       // 带上 index 和原文：调用方需要知道"哪一条"失败了（才能重发或告知模型）。
       // 原先 failed 里只有 error，没有任何定位信息。
-      else failed.push({ index: i, text: parts[i], error: String(r.reason?.message ?? r.reason) });
+      else failed.push({ index, text: parts[index], error: String(r.reason?.message ?? r.reason),
+        ...(r.reason?.code === 'DELIVERY_UNCONFIRMED' && { unconfirmed: true }) });
     }
     // 部分成功也要让调用方知道：原先只在"全败"时抛错，部分成功会静默丢消息
     if (failed.length > 0) {
       const detail = failed.map((f) => `第${f.index + 1}条「${String(f.text).slice(0, 20)}」：${f.error}`).join('；');
-      if (sent.length === 0) throw new Error(detail);
-      console.warn(`[sender] 部分发送失败（${failed.length}/${parts.length}）：${detail}`);
+      if (sent.length === 0 && !options.returnFailures) {
+        throw unconfirmed ? new DeliveryUnconfirmedError(detail) : new Error(detail);
+      }
+      if (sent.length) console.warn(`[sender] 部分发送失败（${failed.length}/${attempts.length}）：${detail}`);
     }
     return { sent, failed };
   }
@@ -488,7 +512,7 @@ export class SendQueue {
       const ts = Date.now();
       const target = kind === 'group' && targetUserId != null ? ` ${targetUserId}` : '对方';
       this.store.appendSelf(chatKey, { text: `[拍一拍] 你拍了拍${target}`, ts, mid: data?.message_id ?? null });
-      this.#recordSent({ chatKey, text: `[拍一拍]${target}`, messageId: null });
+      this.#recordSent({ chatKey, text: `[拍一拍]${target}`, messageId: null, kind: 'poke' });
       return data;
     });
   }

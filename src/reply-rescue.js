@@ -34,7 +34,7 @@
  * @returns {Promise<Array>} tool_call 数组；[] = 什么都别发
  */
 export async function rescueUnsentReply({
-  text, trigger = '', sent = [], api = null, cap = () => null, log = () => {}
+  text, trigger = '', sent = [], api = null, signal, cap = () => null, log = () => {}
 } = {}) {
   const body = String(text || '').trim();
   if (!body) return [];
@@ -64,17 +64,17 @@ export async function rescueUnsentReply({
     const linesFn = cap('reply.salvage-lines');
     if (linesFn) {
       try {
-        const r = await linesFn({ text: body, trigger, alreadySent, api });
+        const r = await linesFn({ text: body, trigger, alreadySent, api, signal });
         if (r?.say) messages = asMessages(r.messages);
-      } catch (error) { log(`salvage-lines 失败：${error?.message ?? error}`); }
+      } catch (error) { signal?.throwIfAborted(); log(`salvage-lines 失败：${error?.message ?? error}`); }
     }
     if (!messages.length) {
       const salvageFn = cap('reply.salvage');
       if (salvageFn) {
         try {
-          const r = await salvageFn({ text: body, trigger, api });
+          const r = await salvageFn({ text: body, trigger, api, signal });
           if (r?.say) messages = asMessages(r.messages);
-        } catch (error) { log(`salvage 失败：${error?.message ?? error}`); }
+        } catch (error) { signal?.throwIfAborted(); log(`salvage 失败：${error?.message ?? error}`); }
       }
     }
   }

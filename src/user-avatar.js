@@ -45,12 +45,12 @@ export function avatarTargetForMessage(entries, requestMessageId, target, mentio
   return ids.length === 1 ? ids[0] : null;
 }
 
-export async function fetchUserAvatar(userId) {
+export async function fetchUserAvatar(userId, { signal } = {}) {
   const id = qqId(userId);
   if (!id) throw new Error('头像目标 QQ 号无效');
   const url = new URL('https://q1.qlogo.cn/g');
   url.search = new URLSearchParams({ b: 'qq', nk: id, s: '100' });
-  const { buffer } = await safeFetchBinary(url.toString(), 512 * 1024, { browseLocked: true });
+  const { buffer } = await safeFetchBinary(url.toString(), 512 * 1024, { browseLocked: true, signal });
   if (buffer.length >= 512 * 1024) throw new Error('QQ 头像超过下载大小上限');
   const mime = detectMime(buffer);
   if (!mime) throw new Error('QQ 未返回可识别的头像图片');

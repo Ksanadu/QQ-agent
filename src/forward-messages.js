@@ -20,19 +20,20 @@ function assertMessageScope(message, mid, chatKey, selfId) {
  * 所以优先使用真实 forward 段；旧占位符先 get_msg 取段，最后兼容仅认 message_id 的实现。
  * message 仅由真实入站事件提供；模型只能传当前会话存档的消息 ID。
  */
-export async function readForwardMessage({ onebot, messageId, message, chatKey }) {
+export async function readForwardMessage({ onebot, messageId, message, chatKey, signal }) {
   const raw = String(messageId ?? '');
   const mid = Number(raw);
   if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(mid) || mid === 0) throw new Error('转发消息 ID 必须是非零整数（可为负数）');
   const tried = new Set();
   const failures = [];
   const getNodes = async (params) => {
+    signal?.throwIfAborted();
     try {
-      const result = await onebot.call('get_forward_msg', params);
+      const result = await onebot.call('get_forward_msg', params, null, { querySignal: signal });
       const nodes = result?.messages ?? result?.data?.messages;
       if (Array.isArray(nodes) && nodes.length) return nodes;
       failures.push('接口返回空的转发节点');
-    } catch (error) { failures.push(String(error?.message ?? error)); }
+    } catch (error) { signal?.throwIfAborted(); failures.push(String(error?.message ?? error)); }
     return null;
   };
   const fromSegments = async (source) => {
@@ -50,8 +51,8 @@ export async function readForwardMessage({ onebot, messageId, message, chatKey }
   if (immediate) return immediate;
 
   let current = null;
-  try { current = await onebot.getMsg(mid); }
-  catch (error) { failures.push(`读取转发卡片失败：${String(error?.message ?? error)}`); }
+  try { current = await onebot.getMsg(mid, { signal }); }
+  catch (error) { signal?.throwIfAborted(); failures.push(`读取转发卡片失败：${String(error?.message ?? error)}`); }
   if (current) {
     // 校验失败必须直接拒绝，不能通过 message_id 回退绕过。
     assertMessageScope(current, mid, chatKey, onebot.selfId);

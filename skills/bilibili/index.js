@@ -32,18 +32,21 @@ async function cfg() {
 }
 
 /** 跑一次 bili 子命令，返回 stdout（YAML）。非零退出时优先透传 CLI 的结构化错误。 */
-async function runBili(args, conf) {
+async function runBili(args, conf, signal) {
+  signal?.throwIfAborted();
   const exe = String(conf.biliPath || '').trim() || DEFAULT_BILI;
   const timeoutMs = Math.max(5, Number(conf.timeoutSec) || 40) * 1000;
   try {
     const { stdout } = await execFileP(exe, args, {
       windowsHide: true,
       timeout: timeoutMs,
+      signal,
       maxBuffer: 16 * 1024 * 1024,
       encoding: 'utf8'
     });
     return stdout;
   } catch (error) {
+    signal?.throwIfAborted();
     // bilibili-cli 失败时 stdout 里也有 YAML envelope（ok:false + error.message），优先用它
     const envelope = String(error?.stdout || '').trim();
     if (envelope) throw new Error(envelope.split('\n').slice(0, 12).join('\n'));
@@ -65,7 +68,7 @@ function fail(message) {
 
 // ─────────────────────────────────────────────── 工具实现
 
-async function doVideo(args) {
+async function doVideo(args, signal) {
   const conf = await cfg();
   if (conf.enabled === false) return fail('B站查询技能已被关掉。');
   const query = String(args?.query ?? '').trim();
@@ -73,36 +76,36 @@ async function doVideo(args) {
   const want = String(args?.want ?? 'info');
   const extra = { subtitle: '--subtitle', comments: '--comments', related: '--related', ai: '--ai' }[want];
   if (want !== 'info' && !extra) return fail(`want 只能是 info/subtitle/comments/related/ai，收到「${want}」`);
-  const out = await runBili(['video', query, ...(extra ? [extra] : []), '--yaml'], conf);
+  const out = await runBili(['video', query, ...(extra ? [extra] : []), '--yaml'], conf, signal);
   const cap = want === 'subtitle' || want === 'comments' ? Math.max(Number(conf.maxChars) || 4000, 6000) : (Number(conf.maxChars) || 4000);
   return { content: clip(out, cap) };
 }
 
-async function doSearch(args) {
+async function doSearch(args, signal) {
   const conf = await cfg();
   if (conf.enabled === false) return fail('B站查询技能已被关掉。');
   const keyword = String(args?.keyword ?? '').trim();
   if (!keyword) return fail('要给一个搜索关键词。');
   const type = args?.type === 'user' ? 'user' : 'video';
   const max = Math.min(10, Math.max(1, Number(args?.max) || 5));
-  const out = await runBili(['search', keyword, '--type', type, '--max', String(max), '--yaml'], conf);
+  const out = await runBili(['search', keyword, '--type', type, '--max', String(max), '--yaml'], conf, signal);
   return { content: clip(out, Number(conf.maxChars) || 4000) };
 }
 
-async function doUser(args) {
+async function doUser(args, signal) {
   const conf = await cfg();
   if (conf.enabled === false) return fail('B站查询技能已被关掉。');
   const user = String(args?.user ?? '').trim();
   if (!user) return fail('要给 UP 主的 UID 或名字。');
-  const out = await runBili(['user', user, '--yaml'], conf);
+  const out = await runBili(['user', user, '--yaml'], conf, signal);
   return { content: clip(out, Number(conf.maxChars) || 4000) };
 }
 
-async function doHot(args) {
+async function doHot(args, signal) {
   const conf = await cfg();
   if (conf.enabled === false) return fail('B站查询技能已被关掉。');
   const max = Math.min(15, Math.max(1, Number(args?.max) || 8));
-  const out = await runBili(['hot', '--max', String(max), '--yaml'], conf);
+  const out = await runBili(['hot', '--max', String(max), '--yaml'], conf, signal);
   return { content: clip(out, Number(conf.maxChars) || 4000) };
 }
 
@@ -127,8 +130,8 @@ export async function setup(api) {
       },
       required: ['query']
     },
-    async execute(_ctx, args) {
-      try { return await doVideo(args); }
+    async execute(ctx, args) {
+      try { return await doVideo(args, ctx?.signal); }
       catch (error) { return fail(String(error?.message ?? error).slice(0, 300)); }
     }
   });
@@ -149,8 +152,8 @@ export async function setup(api) {
       },
       required: ['keyword']
     },
-    async execute(_ctx, args) {
-      try { return await doSearch(args); }
+    async execute(ctx, args) {
+      try { return await doSearch(args, ctx?.signal); }
       catch (error) { return fail(String(error?.message ?? error).slice(0, 300)); }
     }
   });
@@ -168,8 +171,8 @@ export async function setup(api) {
       },
       required: ['user']
     },
-    async execute(_ctx, args) {
-      try { return await doUser(args); }
+    async execute(ctx, args) {
+      try { return await doUser(args, ctx?.signal); }
       catch (error) { return fail(String(error?.message ?? error).slice(0, 300)); }
     }
   });
@@ -187,8 +190,8 @@ export async function setup(api) {
       },
       required: []
     },
-    async execute(_ctx, args) {
-      try { return await doHot(args); }
+    async execute(ctx, args) {
+      try { return await doHot(args, ctx?.signal); }
       catch (error) { return fail(String(error?.message ?? error).slice(0, 300)); }
     }
   });

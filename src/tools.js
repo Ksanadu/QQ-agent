@@ -9,7 +9,8 @@
 import { getConfig, normalizeListStickersLimit } from './config.js';
 import { registerChatFeatureTools } from './chat-feature-tools.js';
 import { assertDeliveryAllowed } from './chat-policy.js';
-import { recordSendMessageDelivery, hasSendMessageDelivery, DELIVERY_REQUIRED } from './reply-completion.js';
+import { confirmedTextReceipts, recordSendMessageDelivery, pendingTextDelivery, hasSendMessageDelivery,
+  deliveryRequired, DELIVERY_UNCONFIRMED, TEXT_PARTS_PENDING } from './reply-completion.js';
 import { normalizeMessageList, unquoteJsonString } from './util.js';
 import { formatStickerList } from './stickers.js';
 import { skillManager } from './skills/manager.js';
@@ -17,6 +18,7 @@ import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } f
 import { webSearch, webFetch, sanitizeQuery } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
 import { findMessageWithReply } from './message-replies.js';
+import { findModelMessage, modelMessage } from './chat-visibility.js';
 import { avatarMemberIds, avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
 import { readForwardMessage } from './forward-messages.js';
 import { REACTION_EMOJIS } from './message-reactions.js';
@@ -37,9 +39,10 @@ function currentGifRoute() {
   return resolveGifRoute({ vision: cfg.api?.vision !== false, video: cfg.api?.video === true });
 }
 
-async function downloadImageAsDataUrl(url, timeoutMs = 30000) {
+async function downloadImageAsDataUrl(url, signal) {
+  signal?.throwIfAborted();
   const safeUrl = await validateImageUrl(url);
-  const { buffer, contentType } = await safeFetchBinary(safeUrl);
+  const { buffer, contentType } = await safeFetchBinary(safeUrl, undefined, { signal });
   return imageBytesAsDataUrl(buffer, contentType);
 }
 
@@ -188,28 +191,52 @@ function registerAllTools() {
       type: 'object',
       properties: {
         messages: { description: '要发送的内容：字符串=一条；数组=分多条', oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+        retryFailed: { type: 'boolean', description: '仅在上一批有分段明确失败时传 true，自动补发失败部分，不用再传 messages。' },
         replyToMessageId: { type: ['integer', 'string'], description: '要引用/回复的消息 id（聊天记录里每条消息前的 #数字，可选）' },
         atUserId: { type: ['integer', 'string'], description: '要 @ 的群成员 QQ 号（可选，与引用二选一，不要滥用）' }
-      },
-      required: ['messages']
+      }
     },
     async execute(ctx, args) {
       try {
-        const messages = normalizeMessageList(args.messages);
-        if (!messages.length) return err('消息内容为空');
-        const result = await ctx.sender.sendTextBatch(ctx.chatKey, messages, {
-          replyToMessageId: args.replyToMessageId ?? null,
-          atUserId: args.atUserId ?? null
+        if (ctx.session.deliveryUnconfirmed) return err(DELIVERY_UNCONFIRMED);
+        const partial = pendingTextDelivery(ctx);
+        if (partial && args.retryFailed !== true) return err(TEXT_PARTS_PENDING);
+        if (!partial && args.retryFailed === true) return err('没有可补发的失败分段，请传 messages');
+        const batch = partial || {
+          messages: normalizeMessageList(args.messages),
+          options: { replyToMessageId: args.replyToMessageId ?? null, atUserId: args.atUserId ?? null,
+            hardSplitAt: Number(getConfig().send?.hardSplitAt) || 0 }
+        };
+        if (!batch.messages.length) return err('消息内容为空');
+        const alreadyDelivered = hasSendMessageDelivery(ctx);
+        const result = await ctx.sender.sendTextBatch(ctx.chatKey, batch.messages, {
+          ...batch.options, requireMessageId: true, returnFailures: true, onlyIndices: batch.indices
         });
-        const delivered = result.sent.filter(s => !s.deduped);
-        recordSendMessageDelivery(ctx, delivered);
-        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...delivered.map((s) => ({ type: 'text', text: s.text, at: s.at })));
+        const delivered = confirmedTextReceipts(result.sent);
+        const failed = [...(result.failed || []), ...(partial ? (result.sent || []).filter(s => s.deduped)
+          .map(s => ({ index: s.index, text: s.text, error: '重复跳过，未获得本次补发回执' })) : [])];
+        const unconfirmed = failed.some(f => f.unconfirmed) || (result.sent || []).some(s => !s.deduped && !confirmedTextReceipts([s]).length);
+        if (unconfirmed) ctx.session.deliveryUnconfirmed = true;
+        const pending = !unconfirmed && failed.length && (partial || delivered.length || alreadyDelivered)
+          ? { ...batch, indices: failed.map(f => f.index) } : null;
+        recordSendMessageDelivery(ctx, delivered, pending);
+        if (!ctx.sender.recordsDeliveries) ctx.session.sent.push(...delivered.map(s => ({
+          type: 'text', text: s.text, messageId: s.messageId, at: s.at
+        })));
         ctx.emit('session-update', ctx.session.id);
-        const note = ['已发送。不要输出"已发送"类汇报，继续思考下一步或直接结束。'];
-        if (result.failed.length) note.push(`（另有 ${result.failed.length} 条发送失败：${result.failed.map((f) => f.error).join('；')}——成功的不需要重发，失败的请稍后再试或减少条数）`);
-        if (!delivered.length) return err('消息因重复被跳过，本轮没有新增文字发送记录。' + DELIVERY_REQUIRED);
-        return ok({ sent: delivered.length, messageIds: delivered.map((s) => s.messageId), note: note.join('') });
+        const receipt = { sent: delivered.length, messageIds: delivered.map(s => s.messageId) };
+        if (unconfirmed || failed.length) return {
+          ...ok({ ...receipt, failed, note: unconfirmed ? DELIVERY_UNCONFIRMED : pending ? TEXT_PARTS_PENDING : '未送达，可修正后重试。' }),
+          isError: true
+        };
+        if (!delivered.length && !partial) return err('消息因重复被跳过，本轮没有新增文字发送记录。' + deliveryRequired(ctx));
+        return ok({ ...receipt, note: '已发送。继续下一步，或在任务完成后结束。' });
       } catch (error) {
+        if (error?.code === 'DELIVERY_UNCONFIRMED') {
+          ctx.session.deliveryUnconfirmed = true;
+          recordSendMessageDelivery(ctx, []);
+          return err(DELIVERY_UNCONFIRMED);
+        }
         return err(error?.message ?? error);
       }
     }
@@ -371,7 +398,7 @@ function registerAllTools() {
           const { buffer, contentType } = readLocalStickerImage(sticker.url);
           r = await imageBytesAsDataUrl(buffer, contentType);
         } else {
-          r = await downloadImageAsDataUrl(sticker.url);
+          r = await downloadImageAsDataUrl(sticker.url, ctx.signal);
         }
         const built = getImagePartsOrVideo(`表情 ${sticker.id}（备注：${sticker.desc || '无'}）：`, [r]);
         if (r.gifVideo) {
@@ -427,7 +454,7 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       try {
-        const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
+        const entry = findModelMessage(ctx.store, ctx.chatKey, args.messageId);
         if (!entry) return err(`在当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
         const imageMedia = (entry.media || []).find((m) => m.kind === 'image' && (m.url || m.file));
         if (!imageMedia) return err('该消息没有可收藏的图片');
@@ -476,7 +503,7 @@ function registerAllTools() {
         const result = await ctx.sender.reactMessage(ctx.chatKey, args);
         return ok({ ...result, note: hasSendMessageDelivery(ctx)
           ? '贴表情动作成功，当前会话已有文字交付；不必机械汇报“已贴表情”。'
-          : '贴表情动作成功不代表会话完成。' + DELIVERY_REQUIRED });
+          : '贴表情动作成功不代表会话完成。' + deliveryRequired(ctx) });
       } catch (error) { return err(error?.message ?? error); }
     }
   });
@@ -529,7 +556,9 @@ function registerAllTools() {
     async execute(ctx, args) {
       const limit = Math.min(100, Math.max(1, Number(args.limit) || 30));
       const offset = Math.max(0, Number(args.offset) || 0);
-      const messages = ctx.store.recent(ctx.chatKey, { limit, offset: offset + (ctx.session.pastStateCount || 0) });
+      const messages = ctx.store.recent(ctx.chatKey, { limit, offset: offset + (ctx.session.pastStateCount || 0) })
+        .map(m => modelMessage(ctx.store, ctx.chatKey, m)).filter(Boolean);
+      ctx.trackMessages?.(messages);
       ctx.session.avatarMemberIds = [...new Set([...(ctx.session.avatarMemberIds || []), ...avatarMemberIds(messages)])];
       return ok({
         count: messages.length,
@@ -560,16 +589,18 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       try {
-        const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
+        const entry = findModelMessage(ctx.store, ctx.chatKey, args.messageId);
         if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
+        ctx.trackMessages?.([entry]);
         // 存档里已是展开文本（收消息时已展开/之前展开过）→ 直接给，不再请求 QQ
         if (String(entry.text || '').startsWith('[合并转发 共')) {
           return ok({ messageId: entry.mid, text: entry.text, note: '该转发已展开（读的是存档）' });
         }
-        const nodes = await readForwardMessage({ onebot: ctx.onebot, messageId: entry.mid, chatKey: ctx.chatKey });
+        const nodes = await readForwardMessage({ onebot: ctx.onebot, messageId: entry.mid, chatKey: ctx.chatKey, signal: ctx.signal });
         const ex = await expandForwardNodes(nodes);
         if (!ex || !ex.text) return err('转发内容为空或已被 QQ 服务端丢弃（发送时间太久）');
         // 写回存档：一次展开，永久升级这条记录（模型/存档页/金句墙都受益）
+        ctx.signal?.throwIfAborted();
         ctx.store.updateByMid(ctx.chatKey, entry.mid, { text: ex.text, appendMedia: ex.media || [] });
         return ok({ messageId: entry.mid, text: ex.text, images: (ex.media || []).length });
       } catch (error) {
@@ -623,7 +654,7 @@ function registerAllTools() {
         chats: chats.map((c) => ({
           chatKey: c.key,
           lastActive: c.lastTs ? new Date(c.lastTs).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '',
-          recentText: String(c.lastText || '').slice(0, 30)
+          recentText: String(modelMessage(ctx.store, c.key, ctx.store.recent(c.key, { limit: 1 }).at(-1))?.text || '').slice(0, 30)
         }))
       });
     }
@@ -677,7 +708,7 @@ function registerAllTools() {
         contextUserId: args.contextUserId, memberIds: ctx.session.avatarMemberIds || []
       });
       if (!userId) return err('无法从本轮请求及所选来源确定头像目标。检查请求消息 ID 和 target；context 需填本轮上下文已确认的 contextUserId，缺少身份信息先查 get_active_members。同名或指代不清再询问用户。');
-      const { buffer, mime } = await fetchUserAvatar(userId);
+      const { buffer, mime } = await fetchUserAvatar(userId, { signal: ctx.signal });
       return { content: imageParts(`QQ ${userId} 的头像：`, [`data:${mime};base64,${buffer.toString('base64')}`]) };
     }
   });
@@ -711,8 +742,8 @@ function registerAllTools() {
               parsedUrl.searchParams.set('spec', '720');
               imageUrl = parsedUrl.toString();
             }
-            results.push(await downloadImageAsDataUrl(imageUrl));
-          } catch (e) { failed.push(String(e?.message ?? e)); }
+            results.push(await downloadImageAsDataUrl(imageUrl, ctx.signal));
+          } catch (e) { ctx.signal?.throwIfAborted(); failed.push(String(e?.message ?? e)); }
         }
         if (!results.length) return err(`图片获取失败：${failed.join('；')}`);
         const note = failed.length ? `（另有 ${failed.length} 张获取失败）` : '';
@@ -849,7 +880,7 @@ function registerAllTools() {
         if (ctx[WEB_SEARCH_MEMO]?.config !== config) ctx[WEB_SEARCH_MEMO] = { config, results: new Map() };
         const { results } = ctx[WEB_SEARCH_MEMO];
         if (results.has(query)) return ok({ ...results.get(query), reused: true });
-        const result = await webSearch(query);
+        const result = await webSearch(query, { signal: ctx.signal });
         const output = result.results.length ? result
           : { query: result.query, results: [], note: '没有搜到结果，仍需查证时请换更具体的关键词。' };
         results.set(query, output);
@@ -876,7 +907,7 @@ function registerAllTools() {
       try {
         // 浏览锁定开启时逐跳校验白名单（与 send_image/search_images 同一口径；
         // 曾经漏传导致锁定形同虚设）
-        const result = await webFetch(String(args.url ?? ''), { browseLocked: browseLockState().enabled });
+        const result = await webFetch(String(args.url ?? ''), { browseLocked: browseLockState().enabled, signal: ctx.signal });
         const body = String(result.body || '');
         return ok({
           url: result.url,
@@ -904,7 +935,7 @@ function registerAllTools() {
       required: ['summary']
     },
     async execute(ctx, args) {
-      if (!hasSendMessageDelivery(ctx)) return err(DELIVERY_REQUIRED);
+      if (!hasSendMessageDelivery(ctx)) return err(deliveryRequired(ctx));
       ctx.session.finishReason = String(args.summary ?? '').slice(0, 300);
       return ok({ finished: true });
     }
@@ -1082,7 +1113,7 @@ function registerAllTools() {
         let buffer;
         let contentType;
         try {
-          ({ buffer, contentType } = await safeFetchBinary(url, maxBytes, { browseLocked: !!lock.enabled }));
+          ({ buffer, contentType } = await safeFetchBinary(url, maxBytes, { browseLocked: !!lock.enabled, signal: ctx.signal }));
         } catch (error) {
           const msg = String(error?.message ?? error);
           // 404 多半是模型抄 URL 时手抖（实测把 /2026/04/xx.jpg 抄成 /2026-04-xx.jpg），
@@ -1184,7 +1215,7 @@ function registerAllTools() {
           return err('图搜能力不可用（web-search 里没有 searchImages）。请用 web_search 找图片页面，再用 web_fetch 拿 images。');
         }
 
-        const list = await searchImages(query, { limit, browseLocked: browseLockState().enabled });
+        const list = await searchImages(query, { limit, browseLocked: browseLockState().enabled, signal: ctx.signal });
         if (!Array.isArray(list) || !list.length) {
           return ok({ query, results: [], note: '没搜到图。换个更具体的关键词再试一次（最多搜 3 次）。' });
         }
@@ -1217,8 +1248,9 @@ function registerAllTools() {
     },
     async execute(ctx, args) {
       try {
-        const entry = ctx.store.findByMid(ctx.chatKey, args.messageId);
+        const entry = findModelMessage(ctx.store, ctx.chatKey, args.messageId);
         if (!entry) return err(`在当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
+        ctx.trackMessages?.([entry]);
         const videoMedia = (entry.media || []).find((m) => m.kind === 'video');
         if (!videoMedia) return err('该消息没有视频（媒体里没有 video 段）');
         if (!ctx.videoReader) return err('视频读取服务未启用');

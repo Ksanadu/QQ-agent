@@ -18,6 +18,7 @@ import { formatFullTime, formatShortTime } from './util.js';
 import { coreGuideIndexes } from './core-guides.js';
 import { avatarMemberIds } from './user-avatar.js';
 import { skillManager } from './skills/manager.js';
+import { modelMessage } from './chat-visibility.js';
 
 // ── 系统提示 ─────────────────────────────────────────────────────────────
 
@@ -362,9 +363,8 @@ export function buildPastState(store, chatKey, { excludeIds = [], limit = null }
   const maxLimit = limit === null ? Math.max(1, Number(cfg.historyCount) || Number(cfg.allCount) || 80) : Math.max(0, Number(limit) || 0);
   const exclude = new Set(excludeIds);
   if (maxLimit <= 0) return { text: '', count: 0, messages: [] };
-  let messages = store.recent(chatKey, { limit: maxLimit + exclude.size }).filter((m) => !exclude.has(m.id));
-  // 撤回的消息不再发给大模型（用户撤回了就不该再被看到）
-  messages = messages.filter((m) => !m.recalled);
+  let messages = store.recent(chatKey, { limit: maxLimit + exclude.size }).filter(m => !exclude.has(m.id))
+    .map(m => modelMessage(store, chatKey, m)).filter(Boolean);
   // 拍一拍事件不进【已读信息】：它是即时召唤信号（已在触发批里出现过了），
   // 历史里堆一排"[拍一拍] X 拍了拍 Y"只会教模型把拍一拍当聊天内容复读。
   messages = messages.filter((m) => !m.isPoke);
@@ -425,6 +425,7 @@ function buildReplyBindings(entries) {
   if (replyRequests.length) {
     const bindings = replyRequests.map(m => {
       const reply = m.reply;
+      if (reply.recalled) return '请求消息 #' + m.mid + ' → 引用目标 #' + reply.messageId + ' 已撤回。不要引用或猜测原文；需要时请用户重发。';
       const heading = `请求消息 #${m.mid} → 引用目标 #${reply.messageId}（${reply.sender || '未知发送者'}${reply.senderId ? `，QQ:${reply.senderId}` : ''}）`;
       if (!reply.resolved) return `${heading}\n原文未获取。不要拿最新消息、其他引用或相似内容代替；应说明无法读取或请用户重发。`;
       const images = (reply.media || []).filter(media => media.kind === 'image').length;
@@ -632,6 +633,7 @@ export function buildUserPrompt(ctx) {
   const anchored = anchorDecision && anchorDecision.mode === 'anchored';
   const readAnchorMessages = anchored ? anchorDecision.anchorMessages : [];
   const readExtraMessages = anchored ? anchorDecision.extraMessages : (past.messages || []);
+  ctx.trackMessages?.([...readAnchorMessages, ...readExtraMessages, ...ctx.triggerEntries]);
   if (ctx.session) {
     ctx.session.avatarMemberIds = avatarMemberIds([...readAnchorMessages, ...readExtraMessages, ...ctx.triggerEntries]);
   }

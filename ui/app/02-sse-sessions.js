@@ -363,9 +363,8 @@ function renderSessionList() {
       ? `<span class="muted">搜 ${s.webSearchCount}</span>`
       : '';
     const isNew = !state.seenSessionIds.has(s.id);
-    // 失败会话的重试按钮：只有 error 状态且没发出过消息的才显示
-    // （已发言的重试会导致群里重复内容，后端同样会拒绝）
-    const retryHtml = s.status === 'error' && !(s.sent && s.sent.length)
+    // 服务端同时检查真实发送记录、未确认回执和已开始的修改操作。
+    const retryHtml = s.status === 'error' && s.retryAllowed !== false && !(s.sent && s.sent.length)
       ? `<button class="btn btn-small session-retry-btn" data-id="${esc(s.id)}" title="把这条会话的触发消息翻回未读并重新处理">重试</button>`
       : '';
     // 运行中/等待中会话的中止按钮：运行中在下一轮请求前安全收尾，等待中直接干净消失

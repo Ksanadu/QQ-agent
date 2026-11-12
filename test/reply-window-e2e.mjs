@@ -198,8 +198,8 @@ try {
   assert.ok(nudged.sent[0].sentAt >= entry(527).receivedAt+520);
   app.onebot.deliveryVerifier.prepare = prepare;
 
-  // Phase 3: waiting output is abortable, and exhaustion retains the last
-  // input in the session without sending the outdated recovery draft.
+  // Phase 3: waiting output is abortable, and exhaustion hands the last
+  // input to a new run without sending the outdated recovery draft.
   await setting({ wakeDelayMs: 950 });
   step = llm.state.requests.length;
   llm.state.script[step] = reply('中止后不得发送');
@@ -215,15 +215,20 @@ try {
   step = llm.state.requests.length;
   llm.state.script[step] = { toolCalls: [call('get_chats')] };
   llm.state.script[step + 1] = { ...reply('用尽额度的旧稿'), delayMs: 400 };
+  llm.state.script[step + 2] = reply('答复最后补充');
   start(521, '预算耗尽');
   await waitFor(() => llm.state.requests.length === step + 2);
   pushGroupMsg(777, '甲', '最后补充不丢失', 522);
   const exhausted = await waitSessionDone('预算耗尽');
-  assert.equal(exhausted.status,'error');
-  assert.match(exhausted.error, /补充消息已保存/);
+  assert.equal(exhausted.status, 'noreply');
+  assert.match(exhausted.finishReason, /已交给后续会话/);
   assert.ok(exhausted.trigger.some(m => m.mid === 522));
   assert.deepEqual(exhausted.unansweredMessageIds, [522]);
-  assert.equal(llm.state.requests.length, step + 2);
-  assert.equal(messages().length, oldSendCount);
-  console.log('PASS Phase 3 core: abort, no stale final delivery, no new tool budget, supplements retained');
+  const handoff = await waitSessionDone('最后补充不丢失');
+  assert.equal(handoff.continuedFrom, exhausted.id);
+  assert.equal(handoff.status, 'done');
+  assert.deepEqual(handoff.trigger.map(m => m.mid), [522]);
+  assert.equal(llm.state.requests.length, step + 3);
+  assert.equal(messages().length, oldSendCount + 1);
+  console.log('PASS Phase 3 core: abort, no stale final delivery, bounded follow-up in a new run');
 } finally { await env.teardown(); }
