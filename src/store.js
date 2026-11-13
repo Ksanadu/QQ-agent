@@ -11,6 +11,7 @@
 //   text:      解析后的纯文本（[图片] 等占位符已内联）
 //   self:      是否是机器人自己发的
 //   read:      已读状态（运行开始时批量置 true）
+//   handledInRun: 是否已纳入主会话（与仅作历史背景的 read 分开记录）
 //   reply:     可选 { messageId, resolved, sender, senderId, text, media, ts }：绑定引用对象的快照（兼容旧摘要）
 //   media:     可选 [{ kind, url, file, faceId, summary }] 原始媒体定位信息
 // }
@@ -114,6 +115,7 @@ export class ChatStore {
       text: String(text ?? ''),
       self: false,
       read: recalled,
+      handledInRun: false,
       ...(recalled ? { recalled: true } : {}),
       reply: reply || null,
       media: Array.isArray(media) ? media : [],
@@ -238,6 +240,20 @@ export class ChatStore {
     m.read = true;
     saveChat(st);
     return true;
+  }
+
+  /** 记录实际交给主会话的输入，重启后也不会被纯 @ 再次向前合并。 */
+  markEntriesHandled(chatKey, ids) {
+    const st = this.#state(chatKey), selected = new Set(ids);
+    let changed = 0;
+    for (const m of st.messages) {
+      if (!selected.has(m.id) || m.self || m.recalled || (m.handledInRun && m.read)) continue;
+      m.handledInRun = true;
+      m.read = true;
+      changed++;
+    }
+    if (changed) saveChat(st);
+    return changed;
   }
 
   /**

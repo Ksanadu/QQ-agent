@@ -285,8 +285,26 @@ export class Orchestrator {
     }
   }
 
+  #prependBeforeMention(chatKey, entries, delayMs, receivedAt) {
+    const mention = entries[0];
+    if (!chatKey.startsWith('group:') || !mention?.pureBotMention || mention.reply || delayMs <= 0) return entries;
+    const handled = this.handledEntries.get(chatKey);
+    const before = this.store.recent(chatKey, { limit: 500 }).filter(m => {
+      const at = Number(m.receivedAt);
+      return m.id < mention.id && m.senderId === mention.senderId && !m.self
+        && m.handledInRun === false && !handled?.has(m.id)
+        && !m.pureBotMention && !m.isPoke && m.atMe !== true
+        && at >= receivedAt - delayMs && at <= receivedAt
+        && (m.text?.trim() || m.media?.length || m.reply)
+        && modelMessage(this.store, chatKey, m);
+    });
+    return before.length ? [...before, ...entries] : entries;
+  }
+
   #startReplyWindow(chatKey, entries, delayMs, receivedAt, fromListener = false) {
-    const window = new ReplyWindow({ entries, delayMs, receivedAt, fromListener });
+    const combined = fromListener ? entries : this.#prependBeforeMention(chatKey, entries, delayMs, receivedAt);
+    const window = new ReplyWindow({ entries: combined, delayMs, receivedAt, fromListener });
+    if (combined !== entries) window.wakeReceivedAt = receivedAt;
     this.#registerWindow(chatKey, window);
     this.scheduleWake(chatKey, 0, { window });
   }
@@ -296,6 +314,7 @@ export class Orchestrator {
     for (const m of entries) { handled.add(m.id); this.listenerRelevant.get(chatKey)?.delete(m.id); }
     while (handled.size > 2000) handled.delete(handled.values().next().value);
     this.handledEntries.set(chatKey, handled);
+    this.store.markEntriesHandled?.(chatKey, entries.map(m => m.id));
   }
 
   #updateReplyWindow(session, window) {
@@ -442,6 +461,7 @@ export class Orchestrator {
 
     const cfgForJudge = getConfig();
     let triggerEntries = [];
+    let wakeReceivedAt = window?.wakeReceivedAt;
     if (!proactive) {
       const probe = this.store.peekUnread(chatKey, 500);
       if (window) {
@@ -477,6 +497,10 @@ export class Orchestrator {
         for (const m of probe.slice(0, first < 0 ? probe.length : first)) this.store.markEntryRead(chatKey, m.id);
         if (first >= 0) {
           triggerEntries = probe.slice(first).filter(m => m.senderId === probe[first].senderId);
+          const mentionAt = probe[first].receivedAt || Date.now();
+          const combined = this.#prependBeforeMention(chatKey, triggerEntries, replyDelay(cfgForJudge.wakeDelayMs), mentionAt);
+          if (combined !== triggerEntries) wakeReceivedAt = mentionAt;
+          triggerEntries = combined;
           for (const m of triggerEntries) this.store.markEntryRead(chatKey, m.id);
         }
       }
@@ -549,7 +573,8 @@ export class Orchestrator {
       this.emit('session-start', { sessionId: session.id, chatKey, triggerSummary });
     }
     const runStartedAt = Date.now();
-    const receivedAt = !reuseSessionId && first?.receivedAt ? first.receivedAt : session.startedAt;
+    const inputReceivedAt = wakeReceivedAt ?? first?.receivedAt;
+    const receivedAt = !reuseSessionId && inputReceivedAt ? inputReceivedAt : session.startedAt;
     session.timing = {
       receivedAt, runStartedAt, queueMs: Math.max(0, runStartedAt - receivedAt),
       modelMs: 0, toolMs: 0, sendPrepareMs: 0, sendReceiptMs: 0
