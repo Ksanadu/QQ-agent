@@ -274,7 +274,7 @@ export class VideoReader {
   /**
    * 转码到模型友好规格：最长边 ≤480px、24fps、H.264+yuv420p、faststart。
    * 返回 data:video/mp4;base64 URL；失败返回 null（调用方回退原 URL）。
-   * 与 gif-to-video 的转换互不复用：那边处理的是 GIF 的帧采样防炸弹，
+   * 与 gif-to-video 的转换互不复用：那边保留 GIF 原始时序并限制源帧数，
    * 这边处理的是常规视频的降规格，参数与护栏各不相同。
    */
   async #transcodeToMax480(filePath) {

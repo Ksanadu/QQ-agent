@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://o.alicdn.com https://kondius.cn; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; media-src 'self' data: blob:; connect-src 'self' https://kondius.cn https://*.aliyuncs.com https://*.alicdn.com; frame-src https://*.aliyuncs.com https://*.alicdn.com https://kondius.cn; worker-src 'self' blob: https://*.alicdn.com https://kondius.cn; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>QQ Agent Desktop</title>
+  <link rel="icon" href="/desktop/assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/desktop/desktop.css">
+  <script src="/theme-init.js"></script>
+</head>
+<body class="desktop-app" data-rail-collapsed="false">
+  <div class="desktop-shell">
+    <aside class="desktop-rail" aria-label="主导航">
+      <div class="desktop-brand">
+        <button id="desktop-rail-toggle" class="desktop-brand-toggle" type="button" aria-controls="tabs" aria-expanded="true" aria-label="收起侧栏" title="收起侧栏">
+          <svg class="desktop-brand-emblem" viewBox="0 0 1280 1280" aria-hidden="true" focusable="false"><use href="/desktop/assets/icon.svg#icon-tile"/><use href="/desktop/assets/icon.svg#icon-ring"/><use class="desktop-brand-star" href="/desktop/assets/icon.svg#icon-star"/><use class="desktop-brand-arrow" href="/desktop/assets/icon.svg#icon-arrow"/></svg>
+        </button>
+        <span class="desktop-brand-copy"><strong>QQ AGENT</strong><small>本地工作台</small></span>
+      </div>
+      <nav id="tabs" aria-label="控制台面板">
+        <button class="tab active" data-tab="sessions" aria-current="page"><svg viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h9M3 5v2m0 4v2m0 4v2"/></svg><span>会话</span><small>01</small></button>
+        <button class="tab" data-tab="memory"><svg viewBox="0 0 24 24"><path d="M8 4H4v16h4m8-16h4v16h-4M9 8a3 3 0 1 1 6 0 3 3 0 0 1-6 0Zm-2 9c0-4 10-4 10 0"/></svg><span>记忆</span><small>02</small></button>
+        <button class="tab" data-tab="usage"><svg viewBox="0 0 24 24"><path d="M4 3v18h17M8 17V9m5 8V5m5 12v-5"/></svg><span>用量</span><small>03</small></button>
+        <button class="tab" data-tab="skills"><svg viewBox="0 0 24 24"><path d="m4 20 11-11m-4-5 1-3m5 5 3-1M6 10H2m15 7 3 1m-9-3 4 4m-2-8 4 4M4 4l2 2"/></svg><span>技能与插件</span><small>04</small></button>
+        <button class="tab" data-tab="snowluma"><svg viewBox="0 0 24 24"><path d="m8 15 8-8M7 17l-1 1a4 4 0 0 1-6-6l5-5m12 0 1-1a4 4 0 0 1 6 6l-5 5" transform="translate(1 0) scale(.9)"/></svg><span>SnowLuma</span><small>05</small></button>
+        <button class="tab" data-tab="settings"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18M8 3v6m8 0v6m-6 0v6"/></svg><span>设置</span><small>06</small></button>
+      </nav>
+      <div class="desktop-rail-footer">
+        <button class="desktop-readiness" data-open="snowluma" title="OneBot 状态"><span class="desktop-readiness-symbol"><span id="onebot-dot" class="dot dot-off"></span></span><span id="onebot-label">OneBot 未连接</span></button>
+        <button class="desktop-readiness" data-open="settings" title="模型设置"><span class="desktop-readiness-symbol desktop-model-mark">◇</span><span id="model-label">模型：—</span></button>
+        <div id="readiness-dots" class="readiness-dots"><span class="desktop-readiness-marks"><span class="rdot" data-target="snowluma"></span><span class="rdot" data-target="snowluma"></span><span class="rdot" data-target="snowluma"></span><span class="rdot" data-target="settings"></span></span><span class="desktop-sync-label">实时同步</span></div>
+        <div class="desktop-signature"><button id="desktop-quit" title="退出桌面，机器人继续运行" aria-label="退出桌面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9m-5-7a8 8 0 1 0 10 0"/></svg><span>退出桌面</span></button><span id="desktop-version">…</span></div>
+      </div>
+    </aside>
+    <section class="desktop-workspace">
+      <header id="topbar">
+        <button id="desktop-connection" class="desktop-connection" title="设置机器人后台地址">0.4.2 后台 <span>↗</span></button>
+        <div class="desktop-top-status"><span id="usage-label">今日：—</span><span id="search-count-label">搜索：—</span><button id="theme-btn" class="icon-btn" aria-label="切换桌面主题"></button><button id="pause-btn" class="btn btn-small">暂停</button><button id="shutdown-btn" class="btn btn-small btn-danger">停机</button></div>
+      </header>
+      <div id="banner" class="banner hidden"></div>
+      <div class="desktop-page-heading"><div><span id="desktop-page-index">01</span><h1 id="desktop-page-title">会话</h1></div><button id="desktop-refresh" class="btn" title="刷新当前页面" aria-label="刷新当前页面">↻</button></div>
+      <!--desktop:views-->
+    </section>
+  </div>
+  <div id="loading-overlay" class="loading-overlay"><div class="loading-card"><div class="loading-title">QQ Agent</div><div class="loading-sub" id="loading-status">连接机器人后台…</div><div class="loading-spinner"></div><pre id="loading-logs" class="loading-logs"></pre></div></div>
+  <dialog id="desktop-connection-dialog"><div class="desktop-dialog-kicker">桌面连接</div><h2>机器人后台</h2><p>连接正在运行的 0.4.2 后台</p><label for="desktop-backend-url">本机地址</label><input id="desktop-backend-url" type="url" placeholder="http://127.0.0.1:3210"><p id="desktop-connection-error" role="alert"></p><div class="desktop-dialog-actions"><button id="desktop-connection-cancel" class="btn">取消</button><button id="desktop-connection-save" class="btn btn-primary">连接</button></div></dialog>
+  <div id="captcha-element"></div><button id="captcha-trigger" type="button" hidden aria-hidden="true" tabindex="-1"></button>
+  <script type="module" src="/app.js"></script>
+  <script defer src="/app/00-core.js"></script><script defer src="/app/01-boot.js"></script><script defer src="/app/02-sse-sessions.js"></script><script defer src="/app/03-snowluma.js"></script><script defer src="/app/04-archive-usage.js"></script><script defer src="/app/05-memory-settings.js"></script><script defer src="/app/06-settings-render.js"></script><script defer src="/app/07-settings-events.js"></script><script defer src="/app/08-modals.js"></script><script defer src="/app/09-community.js"></script><script defer src="/app/10-feedback.js"></script><script defer src="/app/12-concept2-ui.js"></script>
+  <script defer src="/desktop/runtime.js"></script><script defer src="/app/11-init.js"></script>
+</body>
+</html>

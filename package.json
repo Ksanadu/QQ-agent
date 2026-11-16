@@ -46,6 +46,12 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "start:desktop-ui": "electron desktop",
+    "build:desktop-icon": "node scripts/build-desktop-icon.mjs",
+    "pack:desktop-ui": "electron-builder --config desktop/electron-builder.cjs --win --dir --x64",
+    "build:desktop-ui": "electron-builder --config desktop/electron-builder.cjs --win nsis --x64",
+    "test:desktop-package": "node test/desktop-package-test.mjs",
+    "test:desktop-ui": "node test/desktop-gateway-test.mjs && node test/desktop-ui-test.mjs && node test/desktop-lifecycle-test.mjs",
     "start": "electron .",
     "server": "node src/server.js",
     "setup": "node scripts/setup.mjs",

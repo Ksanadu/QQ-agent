@@ -86,3 +86,4 @@ community.key
 
 # Local desktop QA build artifacts
 /dist-qa*/
+/dist-desktop*/

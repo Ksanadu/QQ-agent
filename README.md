@@ -91,6 +91,23 @@ plugins/my-plugin/            skills/my-skill/
   等价于"任意落地的 JS 会被执行"，共享机器建议关掉）。
 - 架构总览见 [doc/extend_development/skill-system.md](doc/extend_development/skill-system.md)。
 ## 安装与使用
+### 独立桌面控制台（0.5.1 视觉）
+
+已有 0.4.2 后台时，可使用新的 **QQ Agent Desktop 0.4.4**：左侧导航、暖炭灰与黄绿色设计，原 Web 外观和聊天后台保留。左上角 Q 图标可收展侧栏，并记住本机状态。安装依赖后运行：
+
+```bash
+npm run start:desktop-ui   # 连接已运行的本机后台，默认 3210
+npm run build:desktop-ui   # 独立安装包输出到 dist-desktop/
+```
+
+退出桌面不会停机器人；桌面主题、窗口和托盘偏好单独保存。使用与分阶段验收见 [独立桌面外观迁移](doc/desktop-ui-migration.md)。
+
+桌面图标以 `desktop/assets/icon.svg` 为源文件；修改后运行 `npm run build:desktop-icon` 生成 PNG 和多尺寸 ICO，再构建安装包。资源及验证记录见 [桌面图标与动态侧栏](doc/desktop-icon-and-sidebar.md)。
+
+Windows 安装包见 [Desktop 0.4.4 Release](https://github.com/Ksanadu/QQ-agent/releases/tag/desktop-v0.4.4)，安装及版本变化见 [发布说明](doc/desktop-release-0.4.4.md)。
+
+### 原桌面与源码启动
+
 **Windows 桌面安装包（0.4.2）**：安装后打开 QQ Agent，在“设置 → 界面系统 → OneBot（SnowLuma）”点击“一键安装 GitHub 最新版 SnowLuma”。程序从官方稳定 Release 下载 Windows x64 完整包并校验 SHA256，安装在 `data/dependencies/`，QQ Agent 安装包本身不捆绑 SnowLuma、QQ、模型权重或登录状态。安装完成后到 SnowLuma 页启动、打开其 WebUI，完成 QQ 接入与登录；OneBot 地址及令牌在设置中配置。
 
 已有 SnowLuma 正在运行时，先停止后再安装/更新。旧程序保留，新版本验证成功后才切换程序目录；原配置及登录数据复制到新目录。

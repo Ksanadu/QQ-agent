@@ -13,9 +13,9 @@
 // 转出来的 mp4 会大到把模型 token 预算炸穿（甚至拖垮网关）。
 // 强约束（写死，不做成配置 —— 这是安全上限，不是口味）：
 //   · 转换后长宽的最大边 ≤ 480 像素
-//   · 转换后的总帧数 ≤ 24 帧
-// ffmpeg 一次调用同时做到：先按需缩放，再均匀重采样帧（fps=帧数/时长），
-// 最后 -frames:v 兜底截断 —— 即使 GIF 元数据撒谎也能被第三道闸拦住。
+//   · 最多接受 600 帧；超限拒绝转换，不截断或降低原始帧率。
+// 转换前只扫描 GIF 容器计帧，不解压像素；转换时保留每帧时间戳，
+// 只播放一个循环，仍限制输出尺寸、体积和处理时间。
 //
 // ── 与项目其它 ffmpeg 用法的关系 ─────────────────────────────────────
 // 项目里已有三处各自探测 ffmpeg（video-reader / image-compress / video-frames 插件），
@@ -30,8 +30,43 @@ import { detectImageType } from './image-type.js';
 
 /** 转换后最大边（像素）。 */
 export const GIF_VIDEO_MAX_DIM = 480;
-/** 转换后最大帧数。 */
-export const GIF_VIDEO_MAX_FRAMES = 24;
+/** 可转换的原始帧数上限；超限拒转，而不是截断动画。 */
+export const GIF_VIDEO_MAX_FRAMES = 600;
+
+/** 扫描 GIF 块计帧，不解压 LZW 数据。格式异常返回 null。 */
+function countGifFrames(buffer) {
+  if (buffer.length < 13) return null;
+  let pos = 13 + (buffer[10] & 0x80 ? 3 * (1 << ((buffer[10] & 7) + 1)) : 0);
+  let frames = 0;
+  function skipBlocks() {
+    while (pos < buffer.length) {
+      const size = buffer[pos++];
+      if (!size) return true;
+      pos += size;
+      if (pos > buffer.length) return false;
+    }
+    return false;
+  }
+  while (pos < buffer.length) {
+    const block = buffer[pos++];
+    if (block === 0x3b) return frames || null;
+    if (block === 0x21) {
+      if (pos >= buffer.length) return null;
+      pos++; // extension label; its payload is a chain of sub-blocks
+    } else if (block === 0x2c) {
+      if (pos + 9 > buffer.length) return null;
+      const flags = buffer[pos + 8];
+      pos += 9 + (flags & 0x80 ? 3 * (1 << ((flags & 7) + 1)) : 0);
+      if (pos >= buffer.length) return null;
+      pos++; // LZW minimum code size
+      if (++frames > GIF_VIDEO_MAX_FRAMES) return frames;
+    } else {
+      return null;
+    }
+    if (!skipBlocks()) return null;
+  }
+  return null;
+}
 
 /** 调外部命令，只看退出码；失败/超时返回 false（不抛）。 */
 function runOk(cmd, args, timeoutMs = 30000) {
@@ -90,6 +125,8 @@ export function isGifBuffer(buf) {
 export async function gifToVideoDataUrl(buffer) {
   const type = detectImageType(buffer);
   if (!type || type.mime !== 'image/gif') return null;
+  const frames = countGifFrames(buffer);
+  if (!frames || frames > GIF_VIDEO_MAX_FRAMES) return null;
   const ffmpeg = await findFfmpeg();
   if (!ffmpeg) return null;
 
@@ -98,35 +135,20 @@ export async function gifToVideoDataUrl(buffer) {
   const tmpOut = path.join(os.tmpdir(), `qqa_gif_out_${stamp}.mp4`);
   try {
     fs.writeFileSync(tmpIn, buffer);
-    // ffmpeg 参数：
-    //   -ignore_loop 0        GIF 是循环格式；不忽略 loop 的话某些版本会无限读帧
-    //   fps=24/duration ...   见下：需要先知道时长才能均匀采到 ≤24 帧
-    //   scale                  最长边 ≤480，等比缩小（小图不放大）
-    //   -frames:v 24           帧数兜底闸：即使 fps 估算被恶意元数据骗过，
-    //                          输出也绝不可能超过 24 帧
-    //   -an                    GIF 没有音轨，显式丢弃避免某些封装器报错
-    //   -movflags +faststart   mp4 索引前置：模型网关多数是流式读，不用等全文件
-    //   -pix_fmt yuv420p       多数解码器只认 420p；GIF 的调色板格式直转会被拒
-    //
-      // fps 的取法（防炸弹的核心）：
-      //   GIF 的帧延时可以任意小（1ms），直接 -r 抽采样会先解码全部帧再丢，
-      //   上万帧的炸弹 GIF 会让 ffmpeg 跑几分钟。所以分两步：
-      //   第一步 ffprobe 拿真实时长；第二步 fps = 24 / duration（每帧间隔都保留）。
-      //   拿不到时长就退回 fps=12 的保守值 —— 24 帧上限由 -frames:v 保证。
-      //
-      // force_divisible_by=2（2026-09-19 修"勾了视频输入 GIF 依旧按图片发"）：
-      //   yuv420p + libx264 只吃偶数宽高。QQ 表情 GIF 常见 640x361 这种奇数高，
-      //   转换会以 "Error while opening encoder" 失败，gifToVideoDataUrl 返回
-      //   null，调用方静默回退到按图片发 —— 表现为「视频输入勾了却永远不生效」。
-      //   整除 2 最多让画面偏 1px，比转换失败强得多。
-      const duration = await probeDuration(tmpIn);
-      const fps = duration > 0 ? Math.min(24, Math.max(1, 24 / duration)) : 12;
-      const okRun = await runOk(ffmpeg, [
-        '-y',
-        '-ignore_loop', '0',
-        '-i', tmpIn,
-        '-vf', `fps=${fps.toFixed(3)},scale='min(${GIF_VIDEO_MAX_DIM},iw)':'min(${GIF_VIDEO_MAX_DIM},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`,
-      '-frames:v', String(GIF_VIDEO_MAX_FRAMES),
+    // 不再使用 fps 滤镜或固定 -r；GIF 的时间单位为 1/100 秒，
+    // passthrough + 相同编码/封装时基保留非均匀帧延时。关闭 B 帧，
+    // 避免编码重排让 MP4 尾帧时长被缩短。ignore_loop=1 只转一个循环。
+    // force_divisible_by=2 保证奇数尺寸也能用 yuv420p 编码。
+    const okRun = await runOk(ffmpeg, [
+      '-y',
+      '-ignore_loop', '1',
+      '-i', tmpIn,
+      '-vf', `scale='min(${GIF_VIDEO_MAX_DIM},iw)':'min(${GIF_VIDEO_MAX_DIM},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`,
+      '-fps_mode', 'passthrough',
+      '-enc_time_base', '1:100',
+      '-video_track_timescale', '100',
+      '-bf', '0',
+      '-frames:v', String(frames),
       '-an',
       '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
@@ -134,12 +156,12 @@ export async function gifToVideoDataUrl(buffer) {
     ], 45000);
     if (!okRun || !fs.existsSync(tmpOut)) return null;
     const out = fs.readFileSync(tmpOut);
-    // 产出为空或大得离谱（>8MB）都视为异常：正常 480px/24帧 的 mp4 不会超过几百 KB
+    // 仍限制输出体积；超限拒转，不通过减帧改变动画。
     if (!out.length || out.length > 8 * 1024 * 1024) return null;
     const dims = await probeVideoSize(tmpOut);
     return {
       dataUrl: `data:video/mp4;base64,${out.toString('base64')}`,
-      frames: Math.min(GIF_VIDEO_MAX_FRAMES, Math.max(1, Math.round(duration > 0 ? Math.min(duration * fps, GIF_VIDEO_MAX_FRAMES) : GIF_VIDEO_MAX_FRAMES))),
+      frames,
       width: dims?.width || 0,
       height: dims?.height || 0
     };
@@ -148,19 +170,6 @@ export async function gifToVideoDataUrl(buffer) {
   } finally {
     try { if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn); } catch { /* ignore */ }
     try { if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut); } catch { /* ignore */ }
-  }
-}
-
-/** ffprobe 读时长（秒）；没有 ffprobe / 读不出返回 0。 */
-async function probeDuration(file) {
-  const txt = await runStdout('ffprobe', [
-    '-v', 'quiet', '-print_format', 'json', '-show_format', file
-  ], 10000);
-  if (!txt) return 0;
-  try {
-    return Number(JSON.parse(txt)?.format?.duration) || 0;
-  } catch {
-    return 0;
   }
 }
 

@@ -1,0 +1,11 @@
+{
+  "name": "qq-agent-desktop",
+  "productName": "QQ Agent Desktop",
+  "version": "0.4.4",
+  "description": "QQ Agent 独立桌面控制台：0.5.1 视觉与现有 0.4.2 后台",
+  "type": "module",
+  "main": "main.js",
+  "license": "MIT",
+  "author": "QQ Agent contributors",
+  "dependencies": {}
+}

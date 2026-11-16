@@ -18,6 +18,7 @@ import { validateImageUrl, safeFetchBinary, browseLockState, checkBrowseLock } f
 import { webSearch, webFetch, sanitizeQuery } from './web-search.js';
 import { expandForwardNodes } from './onebot.js';
 import { findMessageWithReply } from './message-replies.js';
+import { downloadMessageImage } from './message-image-download.js';
 import { findModelMessage, modelMessage } from './chat-visibility.js';
 import { avatarMemberIds, avatarTargetForMessage, fetchUserAvatar } from './user-avatar.js';
 import { readForwardMessage } from './forward-messages.js';
@@ -729,30 +730,24 @@ function registerAllTools() {
       try {
         const entry = findMessageWithReply(ctx, args.messageId);
         if (!entry) return err(`当前会话找不到消息 ${args.messageId}。${midHint(ctx)}`);
-        const urls = (entry.media || []).filter((m) => m.kind === 'image' && m.url).map((m) => m.url);
-        if (!urls.length) return ok(`消息 ${args.messageId} 没有可查看的图片${entry.reply?.messageId ? `；它引用的是 #${entry.reply.messageId}，若要查看引用图片请使用该消息 ID` : ''}`);
+        const images = (entry.media || []).filter((m) => m.kind === 'image' && (m.url || m.file));
+        if (!images.length) return ok(`消息 ${args.messageId} 没有可查看的图片${entry.reply?.messageId ? `；它引用的是 #${entry.reply.messageId}，若要查看引用图片请使用该消息 ID` : ''}`);
         const results = [];
         const failed = [];
-        for (const url of urls) {
+        for (const source of images) {
           try {
-            let imageUrl = url;
-            const parsedUrl = new URL(url);
-            // QQ 图片默认取中等压缩图，避免直接读取大幅原图。
-            if (parsedUrl.hostname === 'multimedia.nt.qq.com.cn' && parsedUrl.pathname === '/download') {
-              parsedUrl.searchParams.set('spec', '720');
-              imageUrl = parsedUrl.toString();
-            }
-            results.push(await downloadImageAsDataUrl(imageUrl, ctx.signal));
+            const { buffer, contentType } = await downloadMessageImage(source, { onebot: ctx.onebot, signal: ctx.signal });
+            results.push(await imageBytesAsDataUrl(buffer, contentType));
           } catch (e) { ctx.signal?.throwIfAborted(); failed.push(String(e?.message ?? e)); }
         }
         if (!results.length) return err(`图片获取失败：${failed.join('；')}`);
         const note = failed.length ? `（另有 ${failed.length} 张获取失败）` : '';
-        // GIF 动图可能被转成了视频部件（见 downloadImageAsDataUrl），文案里区分张数
+        // GIF 动图可能被转成了视频部件（见 imageBytesAsDataUrl），文案里区分张数
         const videoCount = results.filter((r) => r?.gifVideo).length;
         const imageCount = results.length - videoCount;
         const what = [
           imageCount ? `${imageCount} 张图片` : '',
-          videoCount ? `${videoCount} 段视频（由 GIF 动图转换，≤480px/≤24帧）` : ''
+          videoCount ? `${videoCount} 段视频（由 GIF 动图转换，保留原始帧率与帧间时序，≤480px）` : ''
         ].filter(Boolean).join(' + ');
         const built = getImagePartsOrVideo(`消息 ${args.messageId} 的内容${note}：${what}。`, results);
         return built;

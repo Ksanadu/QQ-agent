@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1280" viewBox="0 0 1280 1280" role="img" aria-label="QQ Agent">
+  <title>QQ Agent</title>
+  <g id="icon-artwork">
+    <rect id="icon-tile" x="78" y="88" width="1094" height="1102" rx="218" fill="#f3f3ed"/>
+    <path id="icon-ring" d="M963 800A385 385 0 1 0 571 1007C610 915 637 850 709 850L620 836A211 211 0 1 1 803 719Z" fill="#23251f"/>
+    <path id="icon-star" d="M406 353C418 402 429 414 480 426C429 439 418 451 406 499C393 451 382 439 333 426C382 414 393 402 406 353Z" fill="#f3f3ed"/>
+    <path id="icon-arrow" d="M571 1007C610 915 637 850 709 850H762C778 850 789 838 789 822V761C789 746 801 738 814 746L1005 878C1015 885 1015 891 1005 898L814 1028C801 1037 789 1028 789 1013V974C789 953 775 943 755 944C695 946 662 979 620 1010C603 1010 587 1009 571 1007Z" fill="#d6e452"/>
+  </g>
+</svg>
